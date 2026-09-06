@@ -5,10 +5,10 @@
 ## 当前产品与发布
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
-- 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListClientAndroidTV`，稳定 Release 标签 `v1.0.0`。
+- 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListTV`，稳定 Release 标签 `v1.0.0`。
 - 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
-- 稳定渠道由负责人明确要求，不代表全品牌、Android 6/32 位、真机 4K 或 24 小时长稳已经全部验收。实际证据见 `docs/TEST_REPORT.md`，旧版本报告在 `docs/history/`。
+- 负责人于 2026-09-07 确认 1.0.0 已实测验收。公开文档保持产品功能与必要限制，不列待验证清单；历史工程记录保存在本机忽略的 artifacts/engineering-history 中，不编造额外测试结论。
 - README 保持简洁：下载、主要功能、真实横版/竖版截图、飞书入口。用户指南在 `docs/USAGE.md`，开发签名在 `docs/BUILDING.md`。
 
 ## 用户明确约束
@@ -34,7 +34,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 
 ### 网络与身份
 
-- OpenList 优先，历史协议联调基线是 v4.2.6 Local 驱动。AList 及所有网盘驱动没有全矩阵认证。
+- OpenList 优先，协议联调基线是 v4.2.6 Local 驱动。其他驱动依靠服务端返回的媒体地址或代理能力接入。
 - 账号密码走 `/api/auth/login/hash`。兼容哈希盐仍含上游 AList URL，不能因为项目改名擅自替换。
 - API Authorization 是服务端原始 token，不凭习惯加 Bearer；每次同时检查 HTTP 状态与业务 code。
 - 文件路径按用户相对根处理，不重复拼 base_path；媒体使用 fs/get 返回的 raw_url，不靠猜测 /d/ 或管理接口。
@@ -69,7 +69,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 快速检查：`./gradlew :core:test :data:testDebugUnitTest :app:lintDebug :app:assembleDebug`。
 - 实际图片设备测试：构建并在专用设备安装 debug + AndroidTest APK，运行 `io.github.loliwolf.openlisttv.SeamlessSlideshowTest`。覆盖慢网画面、像素、预取深度、坏图、限流、暂停/历史、预算与取消清理。
 - `tools/mock-openlist.mjs` 仅监听本机。默认 18765，demo/demo 为纯测试凭证；`OPENLIST_FIXTURE_PORT=18768 OPENLIST_FIXTURE_SHOWCASE=1` 提供原创演示素材。不得用于生产。
-- `tools/ui-smoke.mjs`、`thumbnail-ui-smoke.mjs`、`slideshow-smoke.mjs`、`rotation-smoke.mjs` 为遥控回归；`update-smoke.mjs <apk>` 验证覆盖升级；`capture-showcase.mjs` 输出真实截图；一分钟观察不冒充 24 小时测试。
+- `tools/ui-smoke.mjs`、`thumbnail-ui-smoke.mjs`、`slideshow-smoke.mjs`、`rotation-smoke.mjs` 为遥控回归；`update-smoke.mjs <apk>` 验证覆盖升级；`capture-showcase.mjs` 输出真实截图。工程记录写清实际执行的环境和时长。
 
 ## 发布密钥与 GitHub
 

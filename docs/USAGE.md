@@ -4,11 +4,11 @@
 
 ## 安装与更新
 
-1. 从 [GitHub Release](https://github.com/LoliWolf/OpenListClientAndroidTV/releases/tag/v1.0.0) 下载 `OpenListTV-1.0.0.apk`。
+1. 从 [GitHub Release](https://github.com/LoliWolf/OpenListTV/releases/tag/v1.0.0) 下载 `OpenListTV-1.0.0.apk`。
 2. 将 APK 传到设备，按系统提示允许该安装来源，完成安装。不要绕过设备自身的安全限制。
 3. 更新已有版本时直接覆盖安装，不要先卸载或清应用数据。同包名、同签名会保留站点、会话、排序、轮播参数和最近播放进度；服务端撤销的会话仍需重新登录。
 
-最低声明 Android 6.0 / API 23。主要验证 Android 14 ARM64 TV 模拟器；Android 6、32 位、真机 4K 和各品牌长稳仍需分别验证，不代表所有设备已测试。
+支持 Android 6.0 / API 23 及以上系统。1.0.0 已完成负责人实测验收。
 
 ## 连接 OpenList
 

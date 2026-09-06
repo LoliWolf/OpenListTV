@@ -15,7 +15,7 @@ debug 只用于专用测试设备。benchmark 保留早期签名门禁供性能�
 
 ## 发布签名
 
-Release 非 debuggable，开启 R8 和资源裁剪。为保证已有安装覆盖升级，沿用最初 alpha 的证书身份；Subject 保留早期 Android Debug 名称，不等于 APK 开启调试。当前发布渠道是 GitHub；应用商店签名与渠道迁移需另行评估，不宣称商店就绪。
+Release 非 debuggable，开启 R8 和资源裁剪。为保证已有安装覆盖升级，沿用最初 alpha 的证书身份；Subject 保留早期 Android Debug 名称，不等于 APK 开启调试。当前发布渠道是 GitHub；变更渠道时须保持升级签名连续性。
 
 macOS 首次迁移（必须持有原始 alpha 私钥）：
 

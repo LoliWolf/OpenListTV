@@ -2,7 +2,7 @@
 
 轻量原生 Android 客户端，为电视、投影和遥控器设计。
 
-[下载 1.0.0 APK](https://github.com/LoliWolf/OpenListClientAndroidTV/releases/tag/v1.0.0) · [使用说明](docs/USAGE.md) · [飞书知识库](https://my.feishu.cn/wiki/LojHwxGlOiAofDk2JLocRIYinnb)
+[下载 1.0.0 APK](https://github.com/LoliWolf/OpenListTV/releases/tag/v1.0.0) · [使用说明](docs/USAGE.md) · [飞书知识库](https://my.feishu.cn/wiki/LojHwxGlOiAofDk2JLocRIYinnb)
 
 ## 功能
 
@@ -12,7 +12,7 @@
 - 遥控焦点、横竖屏布局、系统深浅色、当前页＋下一页图片缩略图。
 - 有界缓存与内存预算，正常覆盖升级保留配置。
 
-Android 6.0+；4K SDR 与具体编码取决于设备能力，不支持 HDR / 本地视频转码。更新请直接覆盖安装，不要先卸载。兼容性和已验证范围见[测试记录](docs/TEST_REPORT.md)。
+Android 6.0+；1.0.0 支持按设备能力播放 4K SDR，不做本地视频转码。更新请直接覆盖安装，不要先卸载。
 
 ## 截图
 
