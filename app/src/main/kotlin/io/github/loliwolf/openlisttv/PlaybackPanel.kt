@@ -17,6 +17,8 @@ import io.github.loliwolf.openlisttv.core.*
 import io.github.loliwolf.openlisttv.data.*
 import io.github.loliwolf.openlisttv.media.ImagePipeline
 import io.github.loliwolf.openlisttv.media.MediaEngine
+import io.github.loliwolf.openlisttv.media.HdrSupport
+import io.github.loliwolf.openlisttv.media.HdrImageWindow
 import kotlinx.coroutines.*
 
 @UnstableApi
@@ -34,7 +36,8 @@ class PlaybackPanel(
     private fun dp(value: Int) = activity.dp(value)
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]))
     private val http = HttpClients.media(repository.session.site.allowHttp)
-    private val images = ImagePipeline(activity, http)
+    private val images = ImagePipeline(activity, http).apply { hdrEnabled = HdrSupport.canRenderHdrImages(activity) }
+    private val hdrWindow = HdrImageWindow(activity)
     private val imageView = ImageView(activity).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
     private val playerView = PlayerView(activity).apply { useController = false; setKeepContentOnPlayerReset(false) }
     private val center = TvUi.text(activity, "正在加载…", 22f, Color.WHITE).apply { gravity = Gravity.CENTER; setPadding(dp(40), dp(20), dp(40), dp(20)) }
@@ -130,6 +133,7 @@ class PlaybackPanel(
                     // One UI-thread assignment: never clear the old drawable before the new
                     // image is decoded. Displayed bitmaps are GC-managed on our API 23+ baseline;
                     // HWUI may still reference the old frame, so do not recycle it underneath it.
+                    hdrWindow.display(checkNotNull(unshown))
                     imageView.setImageBitmap(unshown); bitmap = unshown; unshown = null
                     imageView.contentDescription = "图片 ${entry.name}"
                     current = entry; pendingEntry = null; currentSource = media; imageElapsed = 0
@@ -249,7 +253,7 @@ class PlaybackPanel(
         if (disposed) return
         val holdImage = options != null && bitmap != null
         stopCurrent(holdImage); ready = false; failures++; skipped++
-        val global = kind in listOf(FailureKind.AUTH, FailureKind.CHALLENGE, FailureKind.RATE_LIMIT, FailureKind.NETWORK, FailureKind.CAPACITY)
+        val global = PlaybackFailures.requiresPause(kind)
         status.text = message
         if (options != null && !global && failures < Budgets.CONSECUTIVE_FAILURES) {
             if (holdImage) center.visibility = GONE
@@ -395,14 +399,15 @@ class PlaybackPanel(
         suspended = true; paused = true
         nextPrepared.cancel(); scope.coroutineContext.cancelChildren(); source?.close(); source = null; reservedNext = null
         stopCurrent(); playerView.player = null; engine?.release(); engine = null
+        hdrWindow.restore()
         center.visibility = VISIBLE; center.text = "已暂停 · 按确认继续当前资源"; pause.text = "继续"; controls.visibility = VISIBLE
         activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
-    fun trimMemory() { images.lowMemory = true; nextPrepared.cancel(); engine?.trimMemory() }
+    fun trimMemory() { images.lowMemory = true; nextPrepared.cancel(); hdrWindow.restore(); engine?.trimMemory() }
     fun dispose() {
         if (disposed) return
         persistPosition()
-        disposed = true; nextPrepared.cancel(); source?.close(); scope.cancel(); stopCurrent(); playerView.player = null; engine?.release(); engine = null
+        disposed = true; nextPrepared.cancel(); source?.close(); scope.cancel(); stopCurrent(); playerView.player = null; engine?.release(); engine = null; hdrWindow.restore()
         activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
     private fun persistPosition() {

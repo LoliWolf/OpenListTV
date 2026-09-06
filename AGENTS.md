@@ -6,6 +6,7 @@
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
 - 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListTV`，稳定 Release 标签 `v1.0.0`。
+- 当前开发分支 `dev/1.0.1`，本地测试版本 `1.0.1-preview.1` / versionCode `5`。用户明确要求实测确认后再发布：不得推送本分支、创建 1.0.1 标签、草稿或 Release，也不得覆盖 1.0.0 APK。下一次正式包的 versionCode 应继续递增。
 - 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
 - 负责人于 2026-09-07 确认 1.0.0 已实测验收。公开文档保持产品功能与必要限制，不列待验证清单；历史工程记录保存在本机忽略的 artifacts/engineering-history 中，不编造额外测试结论。
@@ -14,7 +15,7 @@
 ## 用户明确约束
 
 - 性能与占用优先，不引入 Flutter、WebView 壳、服务端、全量 FFmpeg/VLC 或后台常驻。
-- Android 14 / 2 GB RAM 为主要目标，尽量兼容 API 23；最高 4K SDR 按资源与硬件能力降级，HDR 不在当前范围内。
+- Android 14 / 2 GB RAM 为主要目标，尽量兼容 API 23；最高 4K 按资源与硬件能力运行。1.0.1 新需求扩展 HDR：视频走 Media3/MediaCodec/SurfaceView，Ultra HDR 图片走系统 gainmap；不加入软件转码器。
 - 账号密码、多站点保存/单活动站点、只读文件浏览、播放、排序及三种可扩展轮播均保留。TOTP/SSO/访客等不是当前已实现能力。
 - 无低清源且无法解码时轮播跳过，不做客户端实时转码；5 GB 视频可以流式播放，文件大小不等于运存需求。
 - 方向与已有实现冲突或不符合最佳实践时，实施前向用户指出事实与取舍。
@@ -46,7 +47,9 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 目录每页 100 条，UI/缩略图只保留当前页＋下一页，滚动后淘汰旧页。完整排序的元数据可索引全目录，不等于下载全目录图片。
 - 索引最多 100,000 条 / 64 MiB，深度最多 128；目录变化、截断和达到上限必须提示。
 - 缩略图最多 2 并发，内存 LRU 8 MiB，PNG 磁盘缓存 16 MiB；无 thumb 时只为可见项串行生成原图预览。
-- 图片临时输入最多 32 MiB；音视频缓冲目标 24 MiB，只有一个播放器，不预缓冲下一段视频。
+- 1.0.1 图片临时输入最多 128 MiB，保留至少 8 MiB 磁盘余量；列表原图回退仍限 32 MiB，避免为小缩略图下载巨型原图。音视频缓冲目标仍为 24 MiB，只有一个播放器。
+- 单文件超限属于 RESOURCE_LIMIT，轮播应跳过；真实磁盘/索引容量故障属于 CAPACITY，暂停。不能再次把图片超限归入全局容量故障。
+- HDR 视频保留色彩元数据，由平台硬解输出。无匹配 HDR 显示能力时优先可用 SDR 轨道，否则使用系统显示链路；实际解码错误按原跳过策略处理。Ultra HDR gainmap 的内存也必须计入位图预算。
 - 图片轮播自动下载并解码下一张，直接替换 ImageView，不先清空/显示加载文字。慢网保留当前图，下一张显示后重新计时。
 - 双图目标预算 `min(64 MiB, JVM maxHeap / 4)`，还要预留解码/旋转空间；内存不足时降采样或暂停预解码。预算不是总 PSS 的替代。
 - 已显示 Bitmap 交给 GC/HWUI 管理，不能在仍可能被绘制时 recycle。未显示的预加载由 OneAhead 明确拥有并在取消/替换时回收。
@@ -79,6 +82,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 正式构建：`node tools/build-release.mjs`，或按 BUILDING.md 提供 OPENLIST_RELEASE_* 环境变量；不用长期 daemon/configuration cache 存签名状态。
 - GitHub CLI 已安装；`node tools/gh.mjs ...` 通过现有 Git 凭证调用，不输出或保存 token。发布账号 LoliWolf；公共提交使用 GitHub noreply 邮箱，避免暴露私人邮箱。
 - CI 只有读取权限，执行测试/lint/debug 构建，不持有生产签名。
+- 1.0.1 增加独立 GithubUpdates / UpdateController：仅请求 OpenListTV 的公开 latest Release，无 OpenList token/cookie；比较语义版本、拒绝草稿/预发布及非官方链接。支持手动检查和可关闭的每天一次前台自动检查，不在轮播中弹窗，不自动下载安装，不申请安装包权限。
 - 依赖更新须 `:app:exportNoticeInputs` + `node tools/generate-notices.mjs`，审阅新增许可证。完整许可在 APK 设置中；desugar_jdk_libs 2.1.5 的上游源码归档独立随 Release 提供。
 - 自有代码许可证未指定，不擅自标 MIT/Apache/GPL；第三方授权见 NOTICE.md，不受此状态影响。
 

@@ -114,7 +114,8 @@ class ThumbnailLoader(
                 originals.lock(); originalLocked = true
                 ensureActive()
                 if (key !in visible || key !in allowed) throw CancellationException("Preview is no longer visible")
-                fetch(resolve(entry, false), temp, Budgets.IMAGE_DISK_BYTES)
+                if (entry.size > Budgets.THUMBNAIL_SOURCE_BYTES) throw IOException("Original is too large for a list preview")
+                fetch(resolve(entry, false), temp, Budgets.THUMBNAIL_SOURCE_BYTES)
             }
             try {
                 if (entry.thumbnail.isNotBlank()) {

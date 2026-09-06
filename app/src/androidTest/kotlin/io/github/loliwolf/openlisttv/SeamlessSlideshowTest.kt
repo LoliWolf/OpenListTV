@@ -45,7 +45,7 @@ class SeamlessSlideshowTest {
         val end = SystemClock.elapsedRealtime() + timeout
         while (!condition()) { if (SystemClock.elapsedRealtime() > end) fail("Timed out waiting for condition"); SystemClock.sleep(30) }
     }
-    private inner class Fixture(val delaySecond: AtomicLong = AtomicLong(0), val badSecond: Boolean = false, val rateLimited: Boolean = false, val prefetch: Boolean = true) : AutoCloseable {
+    private inner class Fixture(val delaySecond: AtomicLong = AtomicLong(0), val badSecond: Boolean = false, val rateLimited: Boolean = false, val prefetch: Boolean = true, val oversizedSecond: Boolean = false) : AutoCloseable {
         val requests = CopyOnWriteArrayList<Pair<String, Long>>()
         val frames = CopyOnWriteArrayList<Pair<String, Long>>()
         val violations = CopyOnWriteArrayList<String>()
@@ -67,6 +67,7 @@ class SeamlessSlideshowTest {
                     requests += file to SystemClock.elapsedRealtime()
                     if (request.getHeader("Authorization") != null || request.getHeader("Cookie") != null) violations += "media credentials"
                     if (file == "2.png" && rateLimited) return MockResponse().setResponseCode(429)
+                    if (file == "2.png" && oversizedSecond) return MockResponse().setBody(Buffer().write(bytes[file]!!)).setHeader("Content-Length", Budgets.IMAGE_DISK_BYTES + 1)
                     val body = if (file == "2.png" && badSecond) byteArrayOf(1, 2, 3) else bytes[file]!!
                     return MockResponse().setBody(Buffer().write(body)).setBodyDelay(if (file == "2.png") delaySecond.get() else 0, TimeUnit.MILLISECONDS)
                 }
@@ -164,6 +165,13 @@ class SeamlessSlideshowTest {
         Fixture(badSecond = true).use { f ->
             SystemClock.sleep(1250); assertEquals("图片 1.png", f.displayed()); f.checkScreenPixels()
             f.waitImage("3.png"); assertFalse(f.frames.any { it.first == "图片 2.png" })
+            assertTrue(f.violations.toString(), f.violations.isEmpty())
+        }
+    }
+    @Test fun oversizedImageIsSkippedAndSlideshowAdvancesPastIt() {
+        Fixture(oversizedSecond = true).use { f ->
+            f.waitImage("3.png")
+            assertFalse(f.frames.any { it.first == "图片 2.png" })
             assertTrue(f.violations.toString(), f.violations.isEmpty())
         }
     }

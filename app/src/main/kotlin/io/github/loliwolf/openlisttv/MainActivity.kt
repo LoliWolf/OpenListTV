@@ -23,6 +23,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var sites: SiteStore
     private lateinit var catalog: Catalog
     private val api = OpenListApi()
+    private val updates by lazy { UpdateController(this) { browserVisible && panel == null && slideshowSettings == null && root.hasWindowFocus() && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) } }
     private var repository: FileRepository? = null
     private var currentPath = "/"
     private var offset = 0
@@ -90,6 +91,8 @@ class MainActivity : ComponentActivity() {
                     error.addView(TvUi.button(this@MainActivity, "编辑站点") { showLogin(site) })
                     error.addView(TvUi.spacer(this@MainActivity, 10))
                     error.addView(TvUi.button(this@MainActivity, "已保存站点") { showSites() })
+                    error.addView(TvUi.spacer(this@MainActivity, 10))
+                    error.addView(updateButton())
                 }
             }
         }
@@ -121,7 +124,7 @@ class MainActivity : ComponentActivity() {
         val http = TvUi.check(this, "允许此站点使用 HTTP（局域网明文传输）", existing?.allowHttp ?: false)
         val status = TvUi.text(this, "一期使用账号密码登录；不会保存原始密码。", 14f, TvUi.muted)
         listOf(label, address, username, password, http, status, TvUi.spacer(this, 10)).forEach(form::addView)
-        val row = TvUi.row(this)
+        val row = ActionFlow(this)
         lateinit var connect: Button
         connect = TvUi.button(this, "连接站点", primary = true) {
             if (work?.isActive == true) return@button
@@ -142,6 +145,7 @@ class MainActivity : ComponentActivity() {
         row.addView(connect)
         TvUi.verticalFocus(label, address, username, password, http, connect)
         if (sites.sites().isNotEmpty()) row.addView(TvUi.button(this, "已保存站点") { showSites() })
+        row.addView(updateButton())
         form.addView(row)
         address.requestFocus()
     }
@@ -192,6 +196,7 @@ class MainActivity : ComponentActivity() {
                     empty.addView(TvUi.text(this@MainActivity, "可以返回上一级，或重新加载目录。", 16f, TvUi.muted))
                     listHost.addView(empty, FrameLayout.LayoutParams(-1, -1)); toolbar.getChildAt(0).requestFocus()
                 }
+                updates.foreground()
             } catch (e: CancellationException) { loading = false; if (generation == currentGeneration) status.text = "已暂停加载，按重新加载继续"; throw e }
             catch (e: Exception) {
                 loading = false
@@ -306,6 +311,7 @@ class MainActivity : ComponentActivity() {
         if (saved != null && browserList != null) {
             root.removeAllViews(); root.addView(saved, FrameLayout.LayoutParams(-1, -1)); browserVisible = true
             browserList?.resumeLoading(); browserList?.restoreFocus(focusMemory[currentPath])
+            updates.foreground()
         } else showBrowser()
     }
     private fun showSites() {
@@ -316,9 +322,17 @@ class MainActivity : ComponentActivity() {
         }.setNegativeButton("取消", null).show()
     }
     private fun showSettings() {
-        val content = page("设置", "OpenList TV ${BuildConfig.VERSION_NAME} · 原生 Android · 无后台常驻")
-        content.addView(TvUi.text(this, "画质：按设备能力最高 4K SDR\n无法解码且无低清源：轮播跳过\n索引上限：10 万条 / 64 MiB\n视频缓冲目标上限：24 MiB\n图片按显示尺寸采样，不按文件大小占用运存", 18f))
+        val screen = page("设置", "OpenList TV ${BuildConfig.VERSION_NAME} · 原生 Android · 无后台常驻")
+        val content = TvUi.column(this)
+        screen.addView(ScrollView(this).apply { addView(content) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        content.addView(TvUi.text(this, "画质：最高 4K，HDR 按设备能力输出\n图片输入上限：128 MiB，显示仍采样\n单文件超限或无法解码：轮播跳过\n索引上限：10 万条 / 64 MiB\n视频缓冲目标上限：24 MiB", 18f))
         content.addView(TvUi.spacer(this, 18))
+        lateinit var checkUpdate: Button
+        checkUpdate = TvUi.button(this, "检查 GitHub 更新", primary = true) { updates.manual(checkUpdate) }
+        content.addView(checkUpdate)
+        content.addView(TvUi.check(this, "自动检查 GitHub 更新（每天一次）", updates.automatic).apply { setOnCheckedChangeListener { _, checked -> updates.automatic = checked } })
+        content.addView(TvUi.text(this, "仅检查正式 Release，不发送 OpenList 会话信息，不在轮播中弹窗。", 13f, TvUi.muted))
+        content.addView(TvUi.spacer(this, 10))
         content.addView(TvUi.button(this, "第三方许可") {
             val text = TvUi.text(this, assets.open("third-party-notices.txt").bufferedReader().use { it.readText() }, 12f).apply { setPadding(dp(16), dp(12), dp(16), dp(12)) }
             AlertDialog.Builder(this).setTitle("第三方许可").setView(ScrollView(this).apply { addView(text) }).setPositiveButton("关闭", null).show()
@@ -341,7 +355,13 @@ class MainActivity : ComponentActivity() {
             }.show()
         })
         content.addView(TvUi.spacer(this, 10))
-        content.addView(TvUi.button(this, "返回文件浏览") { showBrowser() }.apply { requestFocus() })
+        content.addView(TvUi.button(this, "返回文件浏览") { showBrowser() })
+        checkUpdate.requestFocus()
+    }
+    private fun updateButton(): Button {
+        lateinit var button: Button
+        button = TvUi.button(this, "检查 GitHub 更新") { updates.manual(button) }
+        return button
     }
     private fun handleRemoteKey(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0 && event.keyCode in listOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER)) return true
@@ -354,7 +374,9 @@ class MainActivity : ComponentActivity() {
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean = handleRemoteKey(event) || super.onKeyDown(keyCode, event)
     override fun onStart() { super.onStart(); if (browserVisible && panel == null) browserList?.resumeLoading() }
-    override fun onStop() { work?.cancel(); browserList?.pauseLoading(); panel?.background(); super.onStop() }
+    override fun onResume() { super.onResume(); updates.foreground() }
+    override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus && ::root.isInitialized) updates.foreground() }
+    override fun onStop() { work?.cancel(); updates.cancel(); browserList?.pauseLoading(); panel?.background(); super.onStop() }
     override fun onTrimMemory(level: Int) { super.onTrimMemory(level); if (level != TRIM_MEMORY_UI_HIDDEN) panel?.trimMemory() }
     override fun onDestroy() { work?.cancel(); browserList?.dispose(); panel?.dispose(); super.onDestroy() }
     companion object {

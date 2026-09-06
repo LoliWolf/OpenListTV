@@ -62,8 +62,12 @@ object OpenListPassword {
         .joinToString("") { "%02x".format(it.toInt() and 255) }
 }
 
-enum class FailureKind { AUTH, ACCESS, CHALLENGE, RATE_LIMIT, NETWORK, SERVER, INVALID, CAPACITY, UNSUPPORTED, STALE_LINK }
+enum class FailureKind { AUTH, ACCESS, CHALLENGE, RATE_LIMIT, NETWORK, SERVER, INVALID, CAPACITY, RESOURCE_LIMIT, UNSUPPORTED, STALE_LINK }
 class ClientFailure(val kind: FailureKind, message: String, cause: Throwable? = null) : Exception(message, cause)
+
+object PlaybackFailures {
+    fun requiresPause(kind: FailureKind?) = kind in setOf(FailureKind.AUTH, FailureKind.CHALLENGE, FailureKind.RATE_LIMIT, FailureKind.NETWORK, FailureKind.CAPACITY)
+}
 
 interface AuthProvider {
     suspend fun login(site: Site, password: String): Session
@@ -80,7 +84,9 @@ object Budgets {
     const val MAX_ENTRIES = 100_000
     const val MAX_DEPTH = 128
     const val INDEX_BYTES = 64L * 1024 * 1024
-    const val IMAGE_DISK_BYTES = 32L * 1024 * 1024
+    const val IMAGE_DISK_BYTES = 128L * 1024 * 1024
+    const val THUMBNAIL_SOURCE_BYTES = 32L * 1024 * 1024
+    const val DISK_RESERVE_BYTES = 8L * 1024 * 1024
     const val METADATA_RESPONSE_BYTES = 4L * 1024 * 1024
     const val PLAYER_BUFFER_BYTES = 24 * 1024 * 1024
     const val HISTORY = 50
