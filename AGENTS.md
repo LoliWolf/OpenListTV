@@ -6,6 +6,7 @@
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
 - 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListClientAndroidTV`，稳定 Release 标签 `v1.0.0`。
+- 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
 - 稳定渠道由负责人明确要求，不代表全品牌、Android 6/32 位、真机 4K 或 24 小时长稳已经全部验收。实际证据见 `docs/TEST_REPORT.md`，旧版本报告在 `docs/history/`。
 - README 保持简洁：下载、主要功能、真实横版/竖版截图、飞书入口。用户指南在 `docs/USAGE.md`，开发签名在 `docs/BUILDING.md`。
@@ -85,6 +86,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 
 - 入口固定为 `https://my.feishu.cn/wiki/LojHwxGlOiAofDk2JLocRIYinnb`，space ID `7682261063663897529`。首页底层 docx 为 `J5Nid5ocdoVqjmxf56lcK4jHnpb`。
 - 用户要求知识库面向使用者，只保留首页与使用文档，原 PRD 退役。使用文档通过首页子节点列表按标题唯一定位，不猜 token、不重复新建。
+- 2026-09-06 已完成替换及删除并回读确认。使用文档：`https://my.feishu.cn/docx/VXlLdkASMoCiGdxdhItcr9kYnfh`；wiki node 为 `ERHmwJswui0Im6kV4nlcO3v7n0e`。修改前仍重新确认实际节点与最新版本。
 - 用户的重要决策已浓缩在本文件。原 PRD 的本地备份在忽略的 artifacts/knowledge-backup 中，不作为对外产品入口。
 - 操作时按可用 lark-doc/lark-wiki/lark-drive 技能，显式 user 身份，先读现状、局部修改、回读验证。创建/删除/改权限分别按授权范围，不扩大到其他文档。
 - README、USAGE、测试报告和知识库随批准的版本更新；历史报告保留。飞书链接不等于匿名公开，不擅自改共享权限。
