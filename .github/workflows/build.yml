@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -17,8 +17,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Android SDK
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Verify preinstalled Android SDK
+        run: |
+          OPENLIST_CI_SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          test -f "$OPENLIST_CI_SDK/platforms/android-36/android.jar"
+          test -x "$OPENLIST_CI_SDK/build-tools/36.0.0/aapt2"
+          printf '%s\n' "ANDROID_HOME=$OPENLIST_CI_SDK" >> "$GITHUB_ENV"
       - name: Unit tests, lint, debug build
         run: ./gradlew :core:test :data:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon
       # Production signing keys are never uploaded to this workflow.
