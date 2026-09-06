@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.bat text eol=crlf whitespace=cr-at-eol
+*.png binary
+*.jar binary
+# Preserve upstream license/NOTICE formatting verbatim.
+app/src/main/assets/third-party-notices.txt -text whitespace=-blank-at-eol

@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <application android:name=".TvApplication" android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules"
+        android:label="@string/app_name" android:icon="@drawable/ic_app" android:banner="@drawable/tv_banner"
+        android:theme="@style/AppTheme" android:usesCleartextTraffic="true" android:supportsRtl="true">
+        <!-- HTTP is gated per-site in both API and media clients, including redirects. -->
+        <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="unspecified"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize" android:windowSoftInputMode="stateAlwaysHidden|adjustResize">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LEANBACK_LAUNCHER" /></intent-filter>
+        </activity>
+    </application>
+</manifest>

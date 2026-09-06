@@ -1,0 +1,74 @@
+# 第三方组件
+
+完整许可与原始 NOTICE 随 APK 打包，可在“设置 → 第三方许可”查看，也见 [许可文本](../app/src/main/assets/third-party-notices.txt)。以下为解析到的运行时 / 构建辅助依赖，R8 可能仅打包其中子集。
+
+- androidx.activity:activity-ktx:1.10.1 — The Apache Software License, Version 2.0
+- androidx.activity:activity:1.10.1 — The Apache Software License, Version 2.0
+- androidx.annotation:annotation-experimental:1.4.0 — The Apache Software License, Version 2.0
+- androidx.annotation:annotation-jvm:1.9.1 — The Apache Software License, Version 2.0
+- androidx.annotation:annotation:1.9.1 — The Apache Software License, Version 2.0
+- androidx.arch.core:core-common:2.2.0 — The Apache Software License, Version 2.0
+- androidx.arch.core:core-runtime:2.2.0 — The Apache Software License, Version 2.0
+- androidx.collection:collection-jvm:1.4.2 — The Apache Software License, Version 2.0
+- androidx.collection:collection:1.4.2 — The Apache Software License, Version 2.0
+- androidx.concurrent:concurrent-futures:1.2.0 — The Apache Software License, Version 2.0
+- androidx.core:core-ktx:1.13.1 — The Apache Software License, Version 2.0
+- androidx.core:core-viewtree:1.0.0 — The Apache Software License, Version 2.0
+- androidx.core:core:1.13.1 — The Apache Software License, Version 2.0
+- androidx.customview:customview-poolingcontainer:1.0.0 — The Apache Software License, Version 2.0
+- androidx.customview:customview:1.0.0 — The Apache Software License, Version 2.0
+- androidx.exifinterface:exifinterface:1.4.1 — The Apache Software License, Version 2.0
+- androidx.interpolator:interpolator:1.0.0 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-common-jvm:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-common:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-livedata-core:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-runtime-android:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-runtime-ktx-android:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-runtime-ktx:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-runtime:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-viewmodel-android:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-viewmodel-savedstate-android:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-viewmodel-savedstate:2.9.4 — The Apache Software License, Version 2.0
+- androidx.lifecycle:lifecycle-viewmodel:2.9.4 — The Apache Software License, Version 2.0
+- androidx.media3:media3-common:1.11.0 — The Apache Software License, Version 2.0
+- androidx.media3:media3-container:1.11.0 — The Apache Software License, Version 2.0
+- androidx.media3:media3-database:1.11.0 — The Apache Software License, Version 2.0
+- androidx.media3:media3-datasource-okhttp:1.11.0 — The Apache Software License, Version 2.0
+- androidx.media3:media3-datasource:1.11.0 — The Apache Software License, Version 2.0
+- androidx.media3:media3-decoder:1.11.0 — The Apache Software License, Version 2.0
+- androidx.media3:media3-exoplayer-hls:1.11.0 — The Apache Software License, Version 2.0
+- androidx.media3:media3-exoplayer:1.11.0 — The Apache Software License, Version 2.0
+- androidx.media3:media3-extractor:1.11.0 — The Apache Software License, Version 2.0
+- androidx.media3:media3-ui:1.11.0 — The Apache Software License, Version 2.0
+- androidx.profileinstaller:profileinstaller:1.4.0 — The Apache Software License, Version 2.0
+- androidx.recyclerview:recyclerview:1.4.0 — The Apache Software License, Version 2.0
+- androidx.savedstate:savedstate-android:1.3.1 — The Apache Software License, Version 2.0
+- androidx.savedstate:savedstate-ktx:1.3.1 — The Apache Software License, Version 2.0
+- androidx.savedstate:savedstate:1.3.1 — The Apache Software License, Version 2.0
+- androidx.startup:startup-runtime:1.2.0 — The Apache Software License, Version 2.0
+- androidx.tracing:tracing:1.0.0 — The Apache Software License, Version 2.0
+- androidx.versionedparcelable:versionedparcelable:1.1.1 — The Apache Software License, Version 2.0
+- com.android.tools:desugar_jdk_libs:2.1.5 — GNU General Public License, version 2, with the Classpath Exception
+- com.android.tools:desugar_jdk_libs_configuration:2.1.5 — BSD-3-Clause
+- com.google.guava:failureaccess:1.0.2 — Apache-2.0 (project/inherited declaration)
+- com.google.guava:guava:33.3.1-android — Apache-2.0 (project/inherited declaration)
+- com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava — Apache-2.0 (project/inherited declaration)
+- com.squareup.okhttp3:okhttp-android:5.3.0 — The Apache Software License, Version 2.0
+- com.squareup.okhttp3:okhttp:5.3.0 — The Apache Software License, Version 2.0
+- com.squareup.okio:okio-jvm:3.16.2 — The Apache Software License, Version 2.0
+- com.squareup.okio:okio:3.16.2 — The Apache Software License, Version 2.0
+- org.jetbrains.kotlin:kotlin-stdlib:2.2.21 — Apache-2.0
+- org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2 — Apache-2.0
+- org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.10.2 — Apache-2.0
+- org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2 — Apache-2.0
+- org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2 — Apache-2.0
+- org.jetbrains.kotlinx:kotlinx-serialization-bom:1.9.0 — Apache-2.0
+- org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.9.0 — Apache-2.0
+- org.jetbrains.kotlinx:kotlinx-serialization-core:1.9.0 — Apache-2.0
+- org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.9.0 — Apache-2.0
+- org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0 — Apache-2.0
+- org.jetbrains:annotations:23.0.0 — The Apache Software License, Version 2.0
+- org.jspecify:jspecify:1.0.0 — The Apache License, Version 2.0
+
+用于兼容旧安卓的 desugar_jdk_libs 2.1.5 使用 GPL v2 + Classpath Exception。[对应上游源码及构建脚本](https://github.com/google/desugar_jdk_libs/tree/73170c345e6a762fc6a1f0301bb15218850023ef)另随 Release 提供源码归档。未修改库源码；由上述固定工具链进行 desugar / R8 处理。本项目自有代码的授权状态见 [NOTICE](../NOTICE.md)。

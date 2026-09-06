@@ -1,0 +1,54 @@
+package io.github.loliwolf.openlisttv.data
+
+import android.content.Context
+import android.content.ContextWrapper
+import android.database.sqlite.SQLiteDatabase
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import io.github.loliwolf.openlisttv.core.*
+import org.junit.Assert.*
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class UpgradeTest {
+    private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
+    @Test fun v1DatabaseAddsThumbnailWithoutDroppingRecordsOrPositions() {
+        val name = "upgrade-fixture.db"; context.deleteDatabase(name)
+        SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(name), null).use { db ->
+            db.execSQL("CREATE TABLE entries(site TEXT,path TEXT,parent TEXT,name TEXT,directory INTEGER,kind TEXT,size INTEGER,modified TEXT,modified_at INTEGER,sign TEXT,ordinal INTEGER,sort_name TEXT,PRIMARY KEY(site,path))")
+            db.execSQL("CREATE TABLE directories(site TEXT,path TEXT,complete INTEGER,total INTEGER,updated INTEGER,PRIMARY KEY(site,path))")
+            db.execSQL("CREATE TABLE progress(site TEXT,path TEXT,modified TEXT,position INTEGER,updated INTEGER,PRIMARY KEY(site,path))")
+            db.execSQL("CREATE TABLE scan_queue(path TEXT PRIMARY KEY,done INTEGER)")
+            db.execSQL("CREATE TABLE scan_items(path TEXT PRIMARY KEY,shuffle_key INTEGER,round INTEGER)")
+            db.execSQL("INSERT INTO entries VALUES('old','/movie.mp4','/','movie.mp4',0,'VIDEO',5000000000,'2026-09-06',0,'',0,'movie.mp4')")
+            db.execSQL("INSERT INTO progress VALUES('old','/movie.mp4','2026-09-06',123000,1)")
+            db.version = 1
+        }
+        Catalog(context, name).use { catalog ->
+            val e = catalog.page("old", "/", 0, 100, SortOrder()).entries.single()
+            assertEquals("", e.thumbnail); assertEquals(5_000_000_000, e.size)
+            assertEquals(123000L, catalog.position("old", e))
+            catalog.clear("old")
+            assertEquals(123000L, catalog.position("old", e))
+            catalog.clear("old", clearHistory = true)
+            assertEquals(0L, catalog.position("old", e))
+        }
+        context.deleteDatabase(name)
+    }
+    @Test fun preferencesAndEncryptedSessionSurviveStoreRecreation() {
+        val isolated = object : ContextWrapper(context) {
+            override fun getSharedPreferences(name: String, mode: Int) = super.getSharedPreferences("upgrade-test-$name", mode)
+        }
+        val site = Site("upgrade", "Saved server", "https://example.com/", "reader", false)
+        val first = SiteStore(isolated)
+        first.save(Session(site, "fixture-session"))
+        first.setSort(site, SortOrder(SortField.SIZE, true, false))
+        val options = SlideshowOptions(TraversalMode.WALK, false, true, 17, 23, 0, false)
+        first.setSlideshow(options)
+        val restored = SiteStore(isolated)
+        assertEquals(site, restored.active()); assertEquals("fixture-session", restored.session(site)?.token)
+        assertEquals(SortOrder(SortField.SIZE, true, false), restored.sort(site)); assertEquals(options, restored.slideshow())
+        restored.remove(site)
+    }
+}
