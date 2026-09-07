@@ -6,7 +6,7 @@
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
 - 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListTV`，稳定 Release 标签 `v1.0.0`。
-- 当前开发分支 `dev/1.0.1`，本地测试版本 `1.0.1-preview.1` / versionCode `5`。用户明确要求实测确认后再发布：不得推送本分支、创建 1.0.1 标签、草稿或 Release，也不得覆盖 1.0.0 APK。下一次正式包的 versionCode 应继续递增。
+- 当前开发分支 `dev/1.0.1`，本地测试版本 `1.0.1-preview.2` / versionCode `6`。preview.1 / code 5 保留原包，不覆盖。用户明确要求实测确认后再发布：不得推送本分支、创建 1.0.1 标签、草稿或 Release，也不得覆盖 1.0.0 APK。下一次正式包的 versionCode 应继续递增。
 - 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
 - 负责人于 2026-09-07 确认 1.0.0 已实测验收。公开文档保持产品功能与必要限制，不列待验证清单；历史工程记录保存在本机忽略的 artifacts/engineering-history 中，不编造额外测试结论。
@@ -26,10 +26,10 @@
 
 | 模块 | 职责与主要入口 |
 | --- | --- |
-| core | 纯 Kotlin：Models、自然排序/路径、资源预算、AuthProvider/FileGateway、TraversalSource、PlaybackHistory、OneAhead |
-| data | OpenListApi、SiteStore/Android Keystore、Catalog/SQLite、FileRepository、全树随机扫描 |
+| core | 纯 Kotlin：Models、自然排序/路径、资源预算、AuthProvider/FileGateway、TraversalSource、PlaybackHistory、OneAhead、BrowserQuery/SlideshowDeadline |
+| data | OpenListApi、SiteStore/Android Keystore、Catalog/SQLite、FileRepository、全树随机扫描、DownloadStore/FileDownloader/LocalDownloadGateway |
 | media | 单 MediaEngine/ExoPlayer、ImagePipeline 串行采样、ThumbnailLoader 有界列表预览 |
-| app | MainActivity 组合，BrowserList 虚拟列表，PlaybackPanel 生命周期，TvUi/ActionFlow 原生响应式布局 |
+| app | MainActivity 组合，BrowserList 虚拟列表，PlaybackPanel 生命周期，DownloadController/DownloadsPanel，TvUi/ActionFlow 原生响应式布局 |
 
 app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。Catalog 是 Application 生命周期的连接管理器，不随 Activity 关闭而中断 IO。
 
@@ -58,6 +58,21 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 坏资源可跳过，连续 10 项失败或鉴权/限流/持续网络错误暂停。Home/休眠/退出取消任务、释放播放资源，回前台需要用户继续。
 - 旋转由原生 View 重排，保留目录、媒体和计时状态；窄屏按钮换行、文件信息合并。不要再锁横屏，也不要裁横图冒充竖屏截图。
 
+### preview.2 轻量功能
+
+- 用户明确选定：当前目录搜索、类型筛选、定时停止轮播、按需播放信息、下载；没有授权上传、整库同步、后台下载或新发布。
+- 搜索为文件名包含匹配（英文大小写不敏感，中文直接匹配），最多 128 字符；类型为全部/图片/视频/音频/文件夹/其他文件。SQL 参数化、`instr` 按字面处理 `%`/`_`/引号。不调用递归搜索 API，不逐键查询。只在按“应用”后使用当前目录完整索引分页；服务器顺序快路径也必须在筛选时走本地索引。
+- 查询条件是有界、按目录保存的会话视图状态。切换站点/重启不保留搜索；排序、账号等持久配置保持兼容。点播前后项沿用同一查询条件，轮播遍历不继承浏览筛选。
+- `slide.stopMinutes` 增量保存 0–1440 分钟，0 默认关闭；从本次轮播开始按 elapsedRealtime 计时，暂停/加载也计时。一个延迟任务；后台取消、不唤醒，返回时检查到期，到期结束完整会话。加载中主动暂停若复用 background() 释放 IO，必须重新挂起前台截止任务，不能漏掉到期。播放中可重新设定本次截止时间，不覆盖下次轮播的默认参数。
+- 播放信息是打开时快照：图片显示位图尺寸/内存/gainmap，音视频轨道编码/分辨率/标称码率/帧率/声道/缓冲与系统 HDR 能力。不得把元数据表述成实测 HDR 输出，不显示签名 URL/凭证，不启动采样监控。
+- 下载使用 Application 生命周期的单任务协调器，防止 Activity 重建创建第二个写入者；MainActivity.onStop 必须取消任务。没有 Service/WorkManager/后台常驻/自动续传，播放前必须 cancel + join 写入者。取消 IO 后的状态落盘和释放 slot 必须整体处于 NonCancellable 中，避免从 IO 返回时的 prompt cancellation 卡住 busy。
+- `FileDownloader` 64 KiB 流式缓冲、进度最多每 500 ms 一次、保留至少 64 MiB 磁盘余量。仅单文件；不打包 HLS/DASH 分片，不支持整目录下载。图片显示仍遵守 128 MiB 输入及双图位图预算，下载本身不使用该图片大小上限。
+- 每次继续通过原站点/账号重新 fs/get；下载客户端及每次重定向不携带 API 凭证。续传必须核对强 ETag、最终 URL 的 SHA-256（不保存原 URL）、Content-Range 起止/总长；无法核对就完整重下，不能盲目追加。替换流须先截断旧文件再记录新 validator。
+- 下载位于应用私有 `files/downloads`；UUID 文件名、`.part` 未完成、原子 rename 为 `.media` 才算完成。独立 `downloads.db` v2（v1→v2 只加 source_key），最多 100 条记录，不保存 token/sign/thumb/raw_url。启动修复已 rename 但 DB 未提交的窄窗口，不能把 `.part` 判为完成。Catalog 仍 v2。
+- 本机下载可离线点播/前后项及按需导出，不需要 OpenList 在线鉴权；不自动组成离线轮播。`LocalDownloadGateway` 不访问网络，MediaEngine 用 DefaultDataSource 支持私有文件，ImagePipeline 只接收下载目录内的本地文件、直接采样不重复复制。
+- 用户明确下载的本机副本在清缓存、退出账号和覆盖安装时保留；卸载会删除。只在用户确认后删除精确 UUID 副本/记录；服务器不变。继续未完成下载必须匹配原站点 URL、账号和站点 ID。
+- 导出走系统 CreateDocument 授权（可选 U 盘/其他位置，取决于设备文件提供方），无广泛存储权限。不提供文件选择器的电视仍能本机离线打开。导出中断提醒目标可能有未完成文件，不擅自删除用户选中的外部文档。
+
 ## 数据与升级：不可破坏
 
 - versionCode 必须单调增加；包名、签名、SharedPreferences 名称 `sites` / `sessions.encrypted`、Keystore alias `openlisttv.sessions.v1` 保持兼容。
@@ -73,6 +88,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 实际图片设备测试：构建并在专用设备安装 debug + AndroidTest APK，运行 `io.github.loliwolf.openlisttv.SeamlessSlideshowTest`。覆盖慢网画面、像素、预取深度、坏图、限流、暂停/历史、预算与取消清理。
 - `tools/mock-openlist.mjs` 仅监听本机。默认 18765，demo/demo 为纯测试凭证；`OPENLIST_FIXTURE_PORT=18768 OPENLIST_FIXTURE_SHOWCASE=1` 提供原创演示素材。不得用于生产。
 - `tools/ui-smoke.mjs`、`thumbnail-ui-smoke.mjs`、`slideshow-smoke.mjs`、`rotation-smoke.mjs` 为遥控回归；`update-smoke.mjs <apk>` 验证覆盖升级；`capture-showcase.mjs` 输出真实截图。工程记录写清实际执行的环境和时长。
+- preview.2 增加 core/BrowserAndTimerTest、data/FileDownloaderTest、CatalogTest 的筛选分页、app/LightweightFeaturesTest 与 tools/lightweight-{ui,rotation,upgrade}-smoke.mjs。轮播 UI 自动化先按暂停，再做 hierarchy 轮询，避免进度刷新使 UIAutomator 等待超过控制栏显示时间。预览包操作说明见 `docs/PREVIEW_1.0.1.md`，详细检查仅写本机忽略的 artifacts/engineering-history。
 
 ## 发布密钥与 GitHub
 

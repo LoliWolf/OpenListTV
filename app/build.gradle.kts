@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.loliwolf.openlisttv"
         minSdk = 23
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.0.1-preview.1"
+        versionCode = 6
+        versionName = "1.0.1-preview.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {

@@ -26,6 +26,8 @@ class BrowserList(
     private val focused: (Entry) -> Unit,
     private val pageChanged: (Int) -> Unit,
     private val problem: (Exception) -> Unit,
+    private val query: BrowserQuery = BrowserQuery(),
+    private val actions: (Entry) -> Unit = {},
 ) : LinearLayout(activity) {
     private val total = initial.total
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
@@ -113,7 +115,7 @@ class BrowserList(
             if (page in pages || page in jobs || page in failedPages || jobs.size >= 2) continue
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 try {
-                    val result = if (order.field == SortField.SERVER && !order.foldersFirst) repository.remotePage(path, page * Budgets.PAGE) else repository.page(path, page * Budgets.PAGE, order)
+                    val result = if (!query.active && order.field == SortField.SERVER && !order.foldersFirst) repository.remotePage(path, page * Budgets.PAGE) else repository.page(path, page * Budgets.PAGE, order, query = query)
                     if (result.total != total) throw ClientFailure(FailureKind.SERVER, "目录内容已变化，请重新加载")
                     if (!closed && page in window.pages) {
                         pages[page] = result.entries
@@ -209,9 +211,11 @@ class BrowserList(
             holder.itemView.contentDescription = e?.let { "打开 ${it.name}" } ?: "加载第 ${position + 1} 项"
             bindPreview(holder, position)
             holder.itemView.setOnClickListener { val index = holder.bindingAdapterPosition; entry(index)?.let { opened(it, index) } ?: ensurePages() }
+            holder.itemView.setOnLongClickListener { entry(holder.bindingAdapterPosition)?.let(actions); true }
             holder.itemView.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus -> if (hasFocus) entry(holder.bindingAdapterPosition)?.let(focused) }
             holder.itemView.setOnKeyListener { _, code, event ->
-                if (code != KeyEvent.KEYCODE_DPAD_DOWN && code != KeyEvent.KEYCODE_DPAD_UP) false
+                if (code == KeyEvent.KEYCODE_MENU) { if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) entry(holder.bindingAdapterPosition)?.let(actions); true }
+                else if (code != KeyEvent.KEYCODE_DPAD_DOWN && code != KeyEvent.KEYCODE_DPAD_UP) false
                 else {
                     val origin = pendingFocus ?: holder.bindingAdapterPosition
                     val target = origin + if (code == KeyEvent.KEYCODE_DPAD_DOWN) 1 else -1

@@ -13,10 +13,12 @@ data class SlideshowOptions(
     val videoSeconds: Int = 0,
     val audioSeconds: Int = 0,
     val prefetch: Boolean = true,
+    val stopAfterMinutes: Int = 0,
 ) {
     init {
         require(imageSeconds in 1..3600)
         require(videoSeconds in 0..3600 && audioSeconds in 0..3600)
+        require(stopAfterMinutes in 0..1440)
     }
     fun accepts(e: Entry) = !e.directory && e.kind != MediaKind.OTHER && (!imageOnly || e.kind == MediaKind.IMAGE) && !e.name.startsWith("._")
 }

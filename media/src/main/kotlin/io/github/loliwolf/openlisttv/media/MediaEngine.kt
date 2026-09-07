@@ -9,6 +9,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -37,7 +38,7 @@ class MediaEngine(private val context: Context, http: OkHttpClient, private val 
     }
     val player: ExoPlayer = ExoPlayer.Builder(context, renderers)
         .setTrackSelector(selector)
-        .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(http)))
+        .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))))
         .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(2000, 10000, 500, 1000)
             .setTargetBufferBytes(Budgets.PLAYER_BUFFER_BYTES).setPrioritizeTimeOverSizeThresholds(false).setBackBuffer(0, false).build())
         .build().apply {
@@ -112,6 +113,26 @@ class MediaEngine(private val context: Context, http: OkHttpClient, private val 
         return true
     }
     fun trimMemory() { if (currentKind == MediaKind.VIDEO && !lowerTrack()) fail("设备可用资源不足，且没有低清播放源") }
+    /** Read only when the user opens the information panel; no monitoring loop. */
+    fun information(): String = buildList {
+        player.videoFormat?.let { f ->
+            add("视频编码：${f.sampleMimeType ?: "未知"}${f.codecs?.let { " · ${it.take(80)}" }.orEmpty()}")
+            if (f.width > 0 && f.height > 0) add("视频分辨率：${f.width} × ${f.height}")
+            if (f.frameRate > 0) add("轨道帧率：${f.frameRate} fps")
+            if (f.bitrate > 0) add("轨道标称码率：${f.bitrate / 1000} kbps")
+            add("轨道动态范围：${HdrSupport.range(f).label}")
+            add("视频解码策略：仅系统硬件解码")
+        }
+        player.audioFormat?.let { f ->
+            add("音频编码：${f.sampleMimeType ?: "未知"}")
+            if (f.channelCount > 0) add("声道数：${f.channelCount}")
+            if (f.sampleRate > 0) add("采样率：${f.sampleRate} Hz")
+        }
+        add("播放状态：${when (player.playbackState) { Player.STATE_BUFFERING -> "缓冲中"; Player.STATE_READY -> if (player.isPlaying) "播放中" else "暂停"; Player.STATE_ENDED -> "已结束"; else -> "未就绪" }}")
+        add("当前位置：${player.currentPosition.coerceAtLeast(0) / 1000} 秒")
+        if (player.duration > 0) add("资源时长：${player.duration / 1000} 秒")
+        add("已缓冲时长：${player.totalBufferedDuration.coerceAtLeast(0) / 1000} 秒")
+    }.joinToString("\n")
     private fun fail(message: String, expired: Boolean = false, kind: FailureKind = FailureKind.UNSUPPORTED) { if (!failed) { failed = true; player.stop(); events.failed(message, expired, kind) } }
     fun stop() { player.stop(); player.clearMediaItems() }
     fun release() { player.release() }

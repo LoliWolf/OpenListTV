@@ -51,10 +51,21 @@ class Catalog(context: Context, name: String = "catalog.db") : SQLiteOpenHelper(
         finally { db.endTransaction() }
     }
     @Synchronized fun finish(site: String, path: String, total: Int) { writableDatabase.update("directories", ContentValues().apply { put("complete", 1); put("total", total); put("updated", System.currentTimeMillis()) }, "site=? AND path=?", arrayOf(site, path)) }
-    @Synchronized fun page(site: String, path: String, offset: Int, limit: Int, sort: SortOrder, filter: EntryFilter? = null): Listing {
+    @Synchronized fun page(site: String, path: String, offset: Int, limit: Int, sort: SortOrder, filter: EntryFilter? = null, query: BrowserQuery = BrowserQuery()): Listing {
         val extra = when (filter) { EntryFilter.FOLDERS -> " AND directory=1"; EntryFilter.MEDIA -> " AND directory=0 AND kind!='OTHER' AND substr(name,1,2)!='._'"; EntryFilter.IMAGES -> " AND kind='IMAGE' AND substr(name,1,2)!='._'"; null -> "" }
-        val where = "site=? AND parent=?$extra"
-        val args = arrayOf(site, path)
+        val type = when (query.type) {
+            BrowserType.ALL -> ""
+            BrowserType.FOLDER -> " AND directory=1"
+            else -> " AND directory=0 AND kind=?"
+        }
+        // instr treats %, _, quotes and backslashes literally; no SQL interpolation.
+        val search = if (query.text.isEmpty()) "" else " AND instr(lower(name),lower(?))>0"
+        val where = "site=? AND parent=?$extra$type$search"
+        val args = buildList {
+            add(site); add(path)
+            if (query.type !in listOf(BrowserType.ALL, BrowserType.FOLDER)) add(query.type.name)
+            if (query.text.isNotEmpty()) add(query.text)
+        }.toTypedArray()
         val total = count("SELECT COUNT(*) FROM entries WHERE $where", args)
         val direction = if (sort.descending) "DESC" else "ASC"
         val primary = when (sort.field) { SortField.NAME -> "sort_name $direction"; SortField.MODIFIED -> "modified_at IS NULL, modified_at $direction"; SortField.SIZE -> "size IS NULL, size $direction"; SortField.SERVER -> "ordinal ASC" }
@@ -121,7 +132,7 @@ class FileRepository(val session: Session, private val gateway: FileGateway, val
             }
         }
     }
-    suspend fun page(path: String, offset: Int, sort: SortOrder, limit: Int = Budgets.PAGE, filter: EntryFilter? = null): Listing = withContext(Dispatchers.IO) { catalog.page(session.site.id, path, offset, limit, sort, filter) }
+    suspend fun page(path: String, offset: Int, sort: SortOrder, limit: Int = Budgets.PAGE, filter: EntryFilter? = null, query: BrowserQuery = BrowserQuery()): Listing = withContext(Dispatchers.IO) { catalog.page(session.site.id, path, offset, limit, sort, filter, query) }
     suspend fun remotePage(path: String, offset: Int): Listing = gateway.list(session, path, password(path), offset / Budgets.PAGE + 1, Budgets.PAGE)
     fun reader(sort: SortOrder): DirectoryReader = object : DirectoryReader {
         override suspend fun page(path: String, offset: Int, filter: EntryFilter): Listing { ensure(path); return this@FileRepository.page(path, offset, sort, 1, filter) }

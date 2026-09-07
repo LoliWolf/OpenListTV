@@ -41,9 +41,9 @@ class SiteStore(context: Context) {
     fun sort(site: Site): SortOrder = runCatching { SortOrder(SortField.valueOf(prefs.getString("${site.id}.sort", "NAME")!!), prefs.getBoolean("${site.id}.descending", false), prefs.getBoolean("${site.id}.folders", true)) }.getOrDefault(SortOrder())
     fun setSort(site: Site, order: SortOrder) { prefs.edit().putString("${site.id}.sort", order.field.name).putBoolean("${site.id}.descending", order.descending).putBoolean("${site.id}.folders", order.foldersFirst).apply() }
     fun slideshow(): SlideshowOptions = runCatching {
-        SlideshowOptions(TraversalMode.valueOf(prefs.getString("slide.mode", "ORDERED")!!), prefs.getBoolean("slide.recursive", true), prefs.getBoolean("slide.images", false), prefs.getInt("slide.imageSeconds", 8), prefs.getInt("slide.videoSeconds", 0), prefs.getInt("slide.audioSeconds", 0), prefs.getBoolean("slide.prefetch", true))
+        SlideshowOptions(TraversalMode.valueOf(prefs.getString("slide.mode", "ORDERED")!!), prefs.getBoolean("slide.recursive", true), prefs.getBoolean("slide.images", false), prefs.getInt("slide.imageSeconds", 8), prefs.getInt("slide.videoSeconds", 0), prefs.getInt("slide.audioSeconds", 0), prefs.getBoolean("slide.prefetch", true), prefs.getInt("slide.stopMinutes", 0))
     }.getOrDefault(SlideshowOptions())
-    fun setSlideshow(o: SlideshowOptions) { prefs.edit().putString("slide.mode", o.mode.name).putBoolean("slide.recursive", o.recursive).putBoolean("slide.images", o.imageOnly).putInt("slide.imageSeconds", o.imageSeconds).putInt("slide.videoSeconds", o.videoSeconds).putInt("slide.audioSeconds", o.audioSeconds).putBoolean("slide.prefetch", o.prefetch).apply() }
+    fun setSlideshow(o: SlideshowOptions) { prefs.edit().putString("slide.mode", o.mode.name).putBoolean("slide.recursive", o.recursive).putBoolean("slide.images", o.imageOnly).putInt("slide.imageSeconds", o.imageSeconds).putInt("slide.videoSeconds", o.videoSeconds).putInt("slide.audioSeconds", o.audioSeconds).putBoolean("slide.prefetch", o.prefetch).putInt("slide.stopMinutes", o.stopAfterMinutes).apply() }
 }
 
 private class CredentialVault(context: Context) {

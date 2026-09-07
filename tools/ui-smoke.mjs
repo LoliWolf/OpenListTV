@@ -47,7 +47,7 @@ await key(20); await focused('打开 Lots'); await key(23); await waitFor('1001 
 await key(22); await waitFor('第 2 页'); await focused('打开 101.png'); passed('1,001-entry global natural sort and D-pad pagination');
 await key(4); await waitFor('9 项'); await focused('打开 Lots'); await key(20); await key(23); await waitFor('demo · /Photos');
 await focused('打开 Nested'); await key(20); await focused('打开 1.png'); await key(23); await waitFor('图片 ·'); passed('Image loaded through resolved media URL');
-await key(19); await key(22); await key(22); await key(22); await key(22); await key(23); await waitFor('demo · /Photos'); await focused('打开 1.png'); passed('Player exit restores selected file');
+await key(19); await pressUntilLabel('退出', 22, 10); await key(23); await waitFor('demo · /Photos'); await focused('打开 1.png'); passed('Player exit restores selected file');
 await key(4); await waitFor('9 项');
 await pressUntilLabel('打开 Tone.wav'); await key(23); await waitFor('0:12'); passed('WAV streaming playback and duration');
 await key(3); await sleep(600); await run('shell', 'am', 'start', '-W', '-n', `${app}/io.github.loliwolf.openlisttv.MainActivity`); await waitFor('已暂停'); passed('Home releases playback and requires explicit resume');

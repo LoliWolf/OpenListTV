@@ -72,6 +72,9 @@ class PlaybackPanel(
     private var skipped = 0
     private var imageElapsed = 0L
     private var resumePosition = 0L
+    private val stopDeadline = SlideshowDeadline()
+    private var stopJob: Job? = null
+    private var activeDialog: AlertDialog? = null
 
     init {
         isFocusable = true
@@ -84,7 +87,10 @@ class PlaybackPanel(
         row.addView(TvUi.button(activity, "上一项", dark = true) { advance(-1) }); row.addView(pause)
         row.addView(TvUi.button(activity, "下一项", dark = true) { advance(1) })
         row.addView(TvUi.button(activity, "音轨 / 字幕", dark = true) { tracks() })
+        row.addView(TvUi.button(activity, "播放信息", dark = true) { information() })
+        if (options != null) row.addView(TvUi.button(activity, "定时停止", dark = true) { stopDialog() })
         row.addView(TvUi.button(activity, "重试", dark = true) {
+            if (stopIfExpired()) return@button
             failures = 0; expiredRetries = 0; suspended = false
             if (options != null && source == null) source = createSource()
             (pendingEntry ?: current)?.let { launchPlay(it) } ?: advance(1)
@@ -102,7 +108,61 @@ class PlaybackPanel(
         )
         return factories.getValue(o.mode).invoke()
     }
-    fun start(entry: Entry?) { showControls(); source = createSource(); if (entry == null) advance(1) else launchPlay(entry) }
+    fun start(entry: Entry?) {
+        stopDeadline.set((options?.stopAfterMinutes ?: 0) * 60_000L, SystemClock.elapsedRealtime()); armStopTimer()
+        showControls(); source = createSource(); if (entry == null) advance(1) else launchPlay(entry)
+    }
+    private fun armStopTimer() {
+        stopJob?.cancel()
+        val remaining = stopDeadline.remaining(SystemClock.elapsedRealtime()) ?: return
+        stopJob = scope.launch { delay(remaining); stopIfExpired() }
+    }
+    private fun stopIfExpired(): Boolean {
+        if (disposed) return true
+        if (!stopDeadline.expired(SystemClock.elapsedRealtime())) return false
+        // Close the complete session, including traversal, lookahead and the player.
+        onExit()
+        Toast.makeText(activity, "定时时间已到，轮播已停止", Toast.LENGTH_LONG).show()
+        return true
+    }
+    fun foreground() { if (!stopIfExpired()) armStopTimer() }
+    private fun stopDialog() {
+        val remaining = stopDeadline.remaining(SystemClock.elapsedRealtime())
+        val input = TvUi.input(activity, "从现在起停止轮播（0–1440 分钟）", if (remaining == null) "0" else ((remaining + 59_999) / 60_000).toString(), "分钟").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER }
+        val dialog = AlertDialog.Builder(activity).setTitle("定时停止轮播")
+            .setMessage("0 为关闭。暂停和加载也计时；后台不唤醒，返回时检查是否到时。不关闭设备。")
+            .setView(input).setPositiveButton("应用", null).setNegativeButton("取消", null).create()
+        presentDialog(dialog)
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val minutes = input.text.toString().toIntOrNull()
+            if (minutes == null || minutes !in 0..1440) { input.error = "请输入 0–1440 分钟"; return@setOnClickListener }
+            stopDeadline.set(minutes * 60_000L, SystemClock.elapsedRealtime()); armStopTimer(); dialog.dismiss()
+        }
+    }
+    private fun information() {
+        val entry = current ?: pendingEntry
+        val snapshot = buildList {
+            add("文件：${entry?.name ?: "尚未打开资源"}")
+            entry?.size?.takeIf { it >= 0 }?.let { add("文件大小：${DisplayText.bytes(it)}") }
+            bitmap?.let { b ->
+                add("显示位图：${b.width} × ${b.height}（按预算采样）")
+                add("位图内存：${DisplayText.bytes(HdrSupport.bitmapBytes(b))}")
+                add("当前位图：${if (android.os.Build.VERSION.SDK_INT >= 34 && b.hasGainmap()) "Ultra HDR / gainmap" else "SDR"}")
+            }
+            if (entry?.kind in listOf(MediaKind.VIDEO, MediaKind.AUDIO)) engine?.information()?.takeIf { it.isNotEmpty() }?.let(::add)
+            val types = HdrSupport.displayTypes(activity)
+            add("系统报告 HDR 显示能力：${HdrSupport.Range.entries.filter { it != HdrSupport.Range.SDR && HdrSupport.supports(it, types) }.joinToString { it.label }.ifEmpty { "未报告" }}")
+            stopDeadline.remaining(SystemClock.elapsedRealtime())?.let { add("轮播将在约 ${(it + 59_999) / 60_000} 分钟后停止") }
+            add("\n打开时快照，不后台采集；轨道信息不等于面板实际输出效果。")
+        }.joinToString("\n")
+        val text = TvUi.text(activity, snapshot, 16f).apply { setPadding(dp(20), dp(12), dp(20), dp(12)) }
+        presentDialog(AlertDialog.Builder(activity).setTitle("播放信息").setView(ScrollView(activity).apply { addView(text) }).setPositiveButton("关闭", null).create())
+    }
+    private fun presentDialog(dialog: AlertDialog) {
+        activeDialog?.dismiss(); activeDialog = dialog; hideJob?.cancel()
+        dialog.setOnDismissListener { if (activeDialog === dialog) activeDialog = null; if (!disposed && !suspended) showControls() }
+        dialog.show()
+    }
     private fun launchPlay(entry: Entry, resolved: MediaSource? = null) {
         autoSkip?.cancel()
         nextPrepared.cancel()
@@ -296,11 +356,16 @@ class PlaybackPanel(
         }
     }
     private fun togglePause() {
+        if (stopIfExpired()) return
         if (!suspended && !ready && loadJob?.isActive == true) {
             if (options != null && bitmap != null) {
                 loadJob?.cancel(); ticker?.cancel(); nextPrepared.cancel(); paused = true; ready = true
                 pause.text = "继续"; activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); showControls()
-            } else background()
+            } else {
+                // A user pause during initial loading releases IO but remains a
+                // foreground session: its stop deadline must still be armed.
+                background(); armStopTimer()
+            }
             return
         }
         if (paused && pendingEntry != null && source != null) { launchPlay(pendingEntry!!); return }
@@ -330,7 +395,7 @@ class PlaybackPanel(
             }
         }
         hideJob?.cancel()
-        AlertDialog.Builder(activity).setTitle("音轨 / 内嵌字幕").setItems(choices.map { it.label }.toTypedArray()) { _, i -> choices[i].apply() }.setNegativeButton("取消", null).create().apply { setOnDismissListener { showControls() }; show() }
+        presentDialog(AlertDialog.Builder(activity).setTitle("音轨 / 内嵌字幕").setItems(choices.map { it.label }.toTypedArray()) { _, i -> choices[i].apply() }.setNegativeButton("取消", null).create())
     }
     private fun externalSubtitle() {
         val entry = current ?: return
@@ -338,7 +403,7 @@ class PlaybackPanel(
             try {
                 val candidates = repository.subtitles(entry)
                 if (candidates.isEmpty()) { Toast.makeText(activity, "同目录没有 SRT / VTT 字幕", Toast.LENGTH_LONG).show(); return@launch }
-                AlertDialog.Builder(activity).setTitle("选择外挂字幕").setItems(candidates.map { it.name }.toTypedArray()) { _, index ->
+                presentDialog(AlertDialog.Builder(activity).setTitle("选择外挂字幕").setItems(candidates.map { it.name }.toTypedArray()) { _, index ->
                     scope.launch {
                         try {
                             val subtitle = repository.resolve(candidates[index])
@@ -350,7 +415,7 @@ class PlaybackPanel(
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) { status.text = MainActivity.message(e); showControls() }
                     }
-                }.setNegativeButton("取消", null).show()
+                }.setNegativeButton("取消", null).create())
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { status.text = MainActivity.message(e); showControls() }
         }
@@ -363,10 +428,11 @@ class PlaybackPanel(
         withContext(Dispatchers.IO) { catalog.savePosition(repository.session.site.id, e, position) }
     }
     private fun showControls() {
+        if (disposed) return
         controls.visibility = VISIBLE; pause.requestFocus(); hideJob?.cancel()
         hideJob = scope.launch { delay(5000); if (!paused && ready) hideControls() }
     }
-    private fun hideControls() { controls.visibility = GONE; requestFocus() }
+    private fun hideControls() { if (activeDialog == null) { controls.visibility = GONE; requestFocus() } }
     fun back(): Boolean { if (controls.visibility == VISIBLE) { hideControls(); return true }; return false }
     fun handleKey(event: KeyEvent): Boolean {
         if (event.action != KeyEvent.ACTION_DOWN) return false
@@ -397,6 +463,7 @@ class PlaybackPanel(
         persistPosition()
         resumePosition = engine?.player?.currentPosition ?: 0
         suspended = true; paused = true
+        activeDialog?.dismiss(); activeDialog = null
         nextPrepared.cancel(); scope.coroutineContext.cancelChildren(); source?.close(); source = null; reservedNext = null
         stopCurrent(); playerView.player = null; engine?.release(); engine = null
         hdrWindow.restore()
@@ -407,7 +474,7 @@ class PlaybackPanel(
     fun dispose() {
         if (disposed) return
         persistPosition()
-        disposed = true; nextPrepared.cancel(); source?.close(); scope.cancel(); stopCurrent(); playerView.player = null; engine?.release(); engine = null; hdrWindow.restore()
+        disposed = true; activeDialog?.dismiss(); activeDialog = null; nextPrepared.cancel(); source?.close(); scope.cancel(); stopCurrent(); playerView.player = null; engine?.release(); engine = null; hdrWindow.restore()
         activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
     private fun persistPosition() {

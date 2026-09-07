@@ -21,6 +21,7 @@ import kotlin.coroutines.resumeWithException
 class ImagePipeline(context: Context, private val http: OkHttpClient, private val inputLimit: Long = Budgets.IMAGE_DISK_BYTES, private val availableSpace: (() -> Long)? = null) {
     private val decodeMutex = Mutex()
     private val directory = File(context.cacheDir, "images").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+    private val localDownloads = File(context.filesDir, "downloads").canonicalFile
     @Volatile var lowMemory = false
     @Volatile var hdrEnabled = false
     init { require(inputLimit in 1..Budgets.IMAGE_DISK_BYTES) }
@@ -30,10 +31,16 @@ class ImagePipeline(context: Context, private val http: OkHttpClient, private va
         val owned = AtomicReference<Bitmap?>()
         try {
             val result = decodeMutex.withLock { withContext(Dispatchers.IO) {
-                requireSpace(0)
-                val temp = diskIo { File.createTempFile("image-", ".tmp", directory) }
+                val local = if (source.url.startsWith("file:")) {
+                    val file = runCatching { File(java.net.URI(source.url)).canonicalFile }.getOrNull()
+                    if (file == null || file.parentFile != localDownloads || !file.isFile) throw ClientFailure(FailureKind.ACCESS, "本机下载文件不可访问")
+                    if (file.length() > inputLimit) throw oversized()
+                    file
+                } else null
+                if (local == null) requireSpace(0)
+                val temp = local ?: diskIo { File.createTempFile("image-", ".tmp", directory) }
                 try {
-                    download(source.url, temp)
+                    if (local == null) download(source.url, temp)
                     ensureActive()
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeFile(temp.path, bounds)
@@ -77,7 +84,7 @@ class ImagePipeline(context: Context, private val http: OkHttpClient, private va
                     }
                     if (!isActive) { decoded.recycle(); ensureActive() }
                     decoded
-                } finally { temp.delete() }
+                } finally { if (local == null) temp.delete() }
             } }
             owned.set(null)
             return result

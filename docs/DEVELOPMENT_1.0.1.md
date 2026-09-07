@@ -1,6 +1,6 @@
 # 1.0.1 本地迭代上下文
 
-分支：`dev/1.0.1`。测试包版本：`1.0.1-preview.1`，versionCode 5。
+分支：`dev/1.0.1`。测试包版本：`1.0.1-preview.2`，versionCode 6。原 preview.1 / code 5 APK 保留，不覆盖。
 
 **用户要求：等负责人实测确认后再发布。该分支、APK、标签和 Release 均不得推送或上传 GitHub。** 目前公开稳定版仍是 1.0.0；仓库改名及 1.0.0 文案清理已单独完成，不属于新版本发布。
 
@@ -14,6 +14,10 @@
 - 列表缩略图的原图回退仍限 32 MiB；已有服务端 thumb 不受原图大小影响，避免为了小预览下载 128 MiB 原图。
 
 ## 继续工作时
+
+preview.2 在上述功能上追加当前目录搜索/类型筛选、会话定时停止、播放信息快照、单任务前台下载及本机离线点播/导出。操作说明见 [预览版说明](PREVIEW_1.0.1.md)。Catalog 仍为 v2；新增独立 downloads.db v2，增量增加 source_key，下载副本不是缓存。
+
+传输任务由 Application 持有唯一 slot，Activity.onStop 取消；播放前等待旧写入者完全退出。强 ETag、最终 URL 哈希和范围响应一致才续传；其他情况完整重下。完成必须流结束/长度校验及原子 rename，进程中断后不能把 .part 当成完成。取消后的 NonCancellable 范围必须覆盖 IO 返回和释放 slot。
 
 先遵循 AGENTS.md 的签名、数据库和资源预算约束。新增代码入口：core/AppVersion、data/GithubUpdates、app/UpdateController、media/HdrSupport。测试入口：GithubUpdatesTest、UpdateAndFailureTest、HdrAndImageBudgetTest、HdrVideoTest、SeamlessSlideshowTest 和 tools/github-update-ui-smoke.mjs。
 

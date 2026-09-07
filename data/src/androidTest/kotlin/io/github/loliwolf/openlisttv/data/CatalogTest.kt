@@ -32,4 +32,22 @@ class CatalogTest {
         assertEquals(50, first.toSet().size); assertNull(catalog.shuffled("a", 1, false))
         assertNotNull(catalog.shuffled("a", 2, false))
     }
+    @Test fun searchAndTypeFilterAreLiteralLocalAndPaged() {
+        catalog.begin("a", "/")
+        val entries = (1..251).map { Entry("/photo$it.PNG", "photo$it.PNG", false) } + listOf(
+            Entry("/photoFolder", "photoFolder", true), Entry("/photo.mp4", "photo.mp4", false), Entry("/photo.wav", "photo.wav", false),
+            Entry("/photo.txt", "photo.txt", false), Entry("/中国100%_'.jpg", "中国100%_'.jpg", false))
+        entries.chunked(100).forEach { catalog.insert("a", "/", it) }; catalog.finish("a", "/", entries.size)
+        catalog.begin("a", "/nested"); catalog.insert("a", "/nested", listOf(Entry("/nested/photo0.PNG", "photo0.PNG", false)))
+        val query = BrowserQuery("PHOTO", BrowserType.IMAGE)
+        val first = catalog.page("a", "/", 0, 100, SortOrder(), query = query)
+        assertEquals(251, first.total); assertEquals(100, first.entries.size); assertEquals("photo1.PNG", first.entries.first().name)
+        assertEquals("photo101.PNG", catalog.page("a", "/", 100, 100, SortOrder(), query = query).entries.first().name)
+        assertEquals(51, catalog.page("a", "/", 200, 100, SortOrder(), query = query).entries.size)
+        for (type in listOf(BrowserType.VIDEO, BrowserType.AUDIO, BrowserType.OTHER, BrowserType.FOLDER)) assertEquals(1, catalog.page("a", "/", 0, 100, SortOrder(), query = BrowserQuery("photo", type)).total)
+        assertEquals(1, catalog.page("a", "/", 0, 100, SortOrder(), query = BrowserQuery("%_'", BrowserType.IMAGE)).total)
+        assertEquals(1, catalog.page("a", "/", 0, 100, SortOrder(), query = BrowserQuery("中国")).total)
+        assertEquals(0, catalog.page("a", "/", 0, 100, SortOrder(), query = BrowserQuery("' OR 1=1 --")).total)
+        assertEquals(0, catalog.page("b", "/", 0, 100, SortOrder(), query = query).total)
+    }
 }
