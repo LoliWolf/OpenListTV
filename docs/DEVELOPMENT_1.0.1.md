@@ -1,12 +1,12 @@
 # 1.0.1 本地迭代上下文
 
-分支：`dev/1.0.1`。测试包版本：`1.0.1-preview.2`，versionCode 6。原 preview.1 / code 5 APK 保留，不覆盖。
+分支：`dev/1.0.1`。测试包版本：`1.0.1-preview.3`，versionCode 7。原 preview.1 / code 5、preview.2 / code 6 APK 保留，不覆盖。
 
 **用户要求：等负责人实测确认后再发布。该分支、APK、标签和 Release 均不得推送或上传 GitHub。** 目前公开稳定版仍是 1.0.0；仓库改名及 1.0.0 文案清理已单独完成，不属于新版本发布。
 
 ## 本次改动
 
-- GitHub 更新检测：登录、连接失败和设置页有手动入口；每天最多一次前台自动检测，可关闭。仅访问公开 latest Release，不带 OpenList 凭证，不接受草稿/预发布或非官方下载链接，不自动安装。
+- GitHub 更新（preview.3）：登录、连接失败和设置页有手动入口；每次进入应用可自动检测并提示，可选择已发布的测试版本。独立配置网络代理或 HTTPS 加速前缀；点击更新后下载、校验并请求系统安装，不静默安装。不带 OpenList 凭证，不接受草稿/非官方附件，完整限制见 AGENTS.md。
 - HDR 视频：删除按 HDR 标记一律拒绝的逻辑，保留色彩元数据，使用 Media3/MediaCodec/SurfaceView 原生链路。显示设备无相应 HDR 能力且有可用 SDR 轨道时优先 SDR；实际解码失败仍按原策略处理。
 - Ultra HDR 图片：Android 14+ 和 HDR 显示条件下保留 gainmap，包含方向变换和内存计数；低内存时回到 SDR 窗口并降采样。
 - 图片输入上限提高到 128 MiB；下载只用小块流式写临时文件，解码位图预算不随文件上限增加。预留 8 MiB 磁盘余量。
@@ -18,6 +18,8 @@
 preview.2 在上述功能上追加当前目录搜索/类型筛选、会话定时停止、播放信息快照、单任务前台下载及本机离线点播/导出。操作说明见 [预览版说明](PREVIEW_1.0.1.md)。Catalog 仍为 v2；新增独立 downloads.db v2，增量增加 source_key，下载副本不是缓存。
 
 传输任务由 Application 持有唯一 slot，Activity.onStop 取消；播放前等待旧写入者完全退出。强 ETag、最终 URL 哈希和范围响应一致才续传；其他情况完整重下。完成必须流结束/长度校验及原子 rename，进程中断后不能把 .part 当成完成。取消后的 NonCancellable 范围必须覆盖 IO 返回和释放 slot。
+
+更新 APK 不复用资源下载记录：UpdatePackages 使用私有 staging/ready，APK 校验和 FileProvider 安装授权单独管理。`node tools/prepare-update-fixture.mjs` 只准备 AndroidTest 校验资源，严禁将 fixture 安装或发布。装好 AndroidTest 后用 `node tools/update-flow-device-tests.mjs` 验证；它在专用模拟器上从测试进程外切换/恢复 AppOp，避免撤销安装授权导致系统杀死 instrumentation。UpdateFlowTest 的 intentLauncher 记录安装请求，不自动确认系统安装。
 
 先遵循 AGENTS.md 的签名、数据库和资源预算约束。新增代码入口：core/AppVersion、data/GithubUpdates、app/UpdateController、media/HdrSupport。测试入口：GithubUpdatesTest、UpdateAndFailureTest、HdrAndImageBudgetTest、HdrVideoTest、SeamlessSlideshowTest 和 tools/github-update-ui-smoke.mjs。
 

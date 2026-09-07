@@ -25,7 +25,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var sites: SiteStore
     private lateinit var catalog: Catalog
     private val api = OpenListApi()
-    private val updates by lazy { UpdateController(this) { browserVisible && panel == null && slideshowSettings == null && root.hasWindowFocus() && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) } }
+    private val updates by lazy { UpdateController(this,
+        canPromptAutomatically = { panel == null && slideshowSettings == null && root.hasWindowFocus() && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) },
+        beforeDownload = { downloads.pauseAndJoin("正在下载应用更新，资源传输已暂停"); browserList?.pauseLoading() },
+        afterDownload = { if (browserVisible && panel == null && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) browserList?.resumeLoading() }) }
     private var repository: FileRepository? = null
     private var currentPath = "/"
     private var offset = 0
@@ -65,6 +68,7 @@ class MainActivity : ComponentActivity() {
         setContentView(root)
         sites = SiteStore(this); catalog = (application as TvApplication).catalog
         exportId = savedInstanceState?.getString("download.exportId")
+        updates.restore(savedInstanceState)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 panel?.let { if (!it.back()) closePlayer(); return }
@@ -328,6 +332,9 @@ class MainActivity : ComponentActivity() {
     private fun openPlayer(entry: Entry?, origin: Int, options: SlideshowOptions?, promptResume: Boolean = true,
         playerRepository: FileRepository? = repository, playerPath: String = currentPath, playerQuery: BrowserQuery = browserQuery) {
         val repo = playerRepository ?: return
+        if (updates.downloading) {
+            work?.cancel(); work = lifecycleScope.launch { updates.pauseDownload(); openPlayer(entry, origin, options, promptResume, repo, playerPath, playerQuery) }; return
+        }
         if (downloads.busy) {
             work?.cancel()
             work = lifecycleScope.launch { downloads.pauseAndJoin("播放优先，下载已暂停；返回本机下载后可手动继续"); openPlayer(entry, origin, options, promptResume, repo, playerPath, playerQuery) }
@@ -387,8 +394,7 @@ class MainActivity : ComponentActivity() {
         lateinit var checkUpdate: Button
         checkUpdate = TvUi.button(this, "检查 GitHub 更新", primary = true) { updates.manual(checkUpdate) }
         content.addView(checkUpdate)
-        content.addView(TvUi.check(this, "自动检查 GitHub 更新（每天一次）", updates.automatic).apply { setOnCheckedChangeListener { _, checked -> updates.automatic = checked } })
-        content.addView(TvUi.text(this, "仅检查正式 Release，不发送 OpenList 会话信息，不在轮播中弹窗。", 13f, TvUi.muted))
+        updates.addSettings(content)
         content.addView(TvUi.spacer(this, 10))
         content.addView(TvUi.button(this, "本机下载") { showDownloads() })
         content.addView(TvUi.spacer(this, 10))
@@ -416,6 +422,9 @@ class MainActivity : ComponentActivity() {
         })
         content.addView(TvUi.spacer(this, 10))
         content.addView(TvUi.button(this, "返回文件浏览") { showBrowser() })
+        // Switch's thumb-focused rectangle can make Android skip a full-width switch
+        // between left-aligned buttons. Define a predictable TV up/down chain.
+        TvUi.verticalFocus(*(0 until content.childCount).map(content::getChildAt).filter { it.isFocusable }.toTypedArray())
         checkUpdate.requestFocus()
     }
     private fun toast(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
@@ -434,6 +443,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun offerDownload(entry: Entry) {
         val repo = repository ?: return
+        if (updates.downloading) { toast("正在下载应用更新，请稍后再下载资源"); return }
         if (downloads.busy) { toast("已有传输正在进行，请在本机下载中暂停后再开始"); return }
         AlertDialog.Builder(this).setTitle("下载 ${entry.name}？")
             .setMessage("${DisplayText.bytes(entry.size)}\n\n保存到应用的本机下载，可离线打开或导出到系统允许的位置。单任务前台下载；播放、退出或休眠时暂停。无可靠续传标识时从头重试。\n\n清缓存不删除下载；卸载应用会删除本机副本。")
@@ -458,7 +468,8 @@ class MainActivity : ComponentActivity() {
                 actions += "导出到 U 盘 / 其他位置" to { exportDownloaded(record) }
             } else actions += "继续 / 重试下载" to {
                 val repo = repository
-                if (repo == null || DownloadStore.identity(repo.session.site) != record.identity) toast("请先登录原站点账号，再继续此下载")
+                if (updates.downloading) toast("正在下载应用更新，请稍后再传输资源")
+                else if (repo == null || DownloadStore.identity(repo.session.site) != record.identity) toast("请先登录原站点账号，再继续此下载")
                 else if (!downloads.start(repo, record.entry, record)) toast("已有传输正在进行，请先暂停")
             }
             actions += "查看下载详情" to {
@@ -521,13 +532,13 @@ class MainActivity : ComponentActivity() {
         return false
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean = handleRemoteKey(event) || super.onKeyDown(keyCode, event)
-    override fun onStart() { super.onStart(); panel?.foreground(); if (browserVisible && panel == null) browserList?.resumeLoading() }
-    override fun onResume() { super.onResume(); updates.foreground() }
+    override fun onStart() { super.onStart(); updates.onStart(); panel?.foreground(); if (browserVisible && panel == null) browserList?.resumeLoading() }
+    override fun onResume() { super.onResume(); updates.onResume() }
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus && ::root.isInitialized) updates.foreground() }
-    override fun onStop() { work?.cancel(); updates.cancel(); downloads.pause("离开前台，传输已暂停；可手动继续"); browserList?.pauseLoading(); panel?.background(); super.onStop() }
+    override fun onStop() { work?.cancel(); updates.background(); downloads.pause("离开前台，传输已暂停；可手动继续"); browserList?.pauseLoading(); panel?.background(); super.onStop() }
     override fun onTrimMemory(level: Int) { super.onTrimMemory(level); if (level != TRIM_MEMORY_UI_HIDDEN) panel?.trimMemory() }
     override fun onDestroy() { work?.cancel(); downloadList?.dispose(); browserList?.dispose(); panel?.dispose(); super.onDestroy() }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putString("download.exportId", exportId); super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState: Bundle) { outState.putString("download.exportId", exportId); updates.save(outState); super.onSaveInstanceState(outState) }
     companion object {
         fun message(e: Exception): String {
             if (BuildConfig.DEBUG) android.util.Log.d("OpenListTV", generateSequence<Throwable>(e) { it.cause }.joinToString(" <- ") { it.javaClass.simpleName + ": " + (it.message.orEmpty().replace(Regex("https?://\\S+"), "[address omitted]").take(160)) })

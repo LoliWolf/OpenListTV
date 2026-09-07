@@ -12,6 +12,7 @@ class TvApplication : Application() {
     // One process-lifetime database, never an Activity-owned connection closed under an IO job.
     val catalog by lazy { Catalog(this) }
     val downloads by lazy { DownloadStore(this) }
+    val updatePackages by lazy { UpdatePackages(this) }
     // Keep the single writer slot across Activity recreation. No jobs exist when idle;
     // MainActivity.onStop cancels the current task, including its socket/file writer.
     val transfers by lazy { DownloadController(this, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), downloads) }

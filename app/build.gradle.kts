@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.loliwolf.openlisttv"
         minSdk = 23
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.0.1-preview.2"
+        versionCode = 7
+        versionName = "1.0.1-preview.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -39,6 +39,8 @@ android {
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17; isCoreLibraryDesugaringEnabled = true }
     buildFeatures { buildConfig = true }
+    // Locally generated signed fixture, never included in a production APK.
+    sourceSets.getByName("androidTest").assets.srcDir(rootProject.file("artifacts/update-fixture-assets"))
 }
 
 // Keep alpha updates compatible with the already distributed alpha01 certificate.

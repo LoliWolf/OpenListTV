@@ -6,7 +6,7 @@
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
 - 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListTV`，稳定 Release 标签 `v1.0.0`。
-- 当前开发分支 `dev/1.0.1`，本地测试版本 `1.0.1-preview.2` / versionCode `6`。preview.1 / code 5 保留原包，不覆盖。用户明确要求实测确认后再发布：不得推送本分支、创建 1.0.1 标签、草稿或 Release，也不得覆盖 1.0.0 APK。下一次正式包的 versionCode 应继续递增。
+- 当前开发分支 `dev/1.0.1`，本地测试版本 `1.0.1-preview.3` / versionCode `7`。preview.1 / code 5、preview.2 / code 6 保留原包，不覆盖。用户明确要求实测确认后再发布：不得推送本分支、创建 1.0.1 标签、草稿或 Release，也不得覆盖 1.0.0 APK。下一次正式包的 versionCode 应继续递增。
 - 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
 - 负责人于 2026-09-07 确认 1.0.0 已实测验收。公开文档保持产品功能与必要限制，不列待验证清单；历史工程记录保存在本机忽略的 artifacts/engineering-history 中，不编造额外测试结论。
@@ -99,7 +99,13 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 正式构建：`node tools/build-release.mjs`，或按 BUILDING.md 提供 OPENLIST_RELEASE_* 环境变量；不用长期 daemon/configuration cache 存签名状态。
 - GitHub CLI 已安装；`node tools/gh.mjs ...` 通过现有 Git 凭证调用，不输出或保存 token。发布账号 LoliWolf；公共提交使用 GitHub noreply 邮箱，避免暴露私人邮箱。
 - CI 只有读取权限，执行测试/lint/debug 构建，不持有生产签名。
-- 1.0.1 增加独立 GithubUpdates / UpdateController：仅请求 OpenListTV 的公开 latest Release，无 OpenList token/cookie；比较语义版本、拒绝草稿/预发布及非官方链接。支持手动检查和可关闭的每天一次前台自动检查，不在轮播中弹窗，不自动下载安装，不申请安装包权限。
+- preview.3 按用户明确要求替换旧“每天一次、仅稳定版、浏览器下载”更新行为：设置有“自动检测更新（每次启动）”“参与测试版本”开关，以及仅更新使用的代理。原 automatic 偏好沿用，testing 默认 false；不再用 lastAttempt/ETag 缓存跳过启动检查。
+- UpdateLaunchGate 每次进入应用仅检查一次，翻目录/窗口焦点/旋转不重复；系统安装/授权流程返回不重复。新版本弹窗，无新版或失败轻提示；播放或其他模态界面内延后提示。草稿和 Actions 构建产物不纳入“测试版本”。
+- GithubUpdates 分页读取官方 `/repos/LoliWolf/OpenListTV/releases`，按 SemVer 选最高的可用 APK，不以列表首项/上传时间作为最高版本；可选正式＋预发布。每页最多 30 条 / 2 MiB，最多 50 页 / 60 秒，触及上限报检查失败而非声称最新。只保留当前页和最佳候选。
+- UpdateNetwork 与 OpenList/媒体客户端完全隔离，不修改系统 ProxySelector、Authenticator 或全局代理。支持不含账号密码的 http://host:port、socks5://host:port；另有 HTTPS GitHub 加速前缀模式，前缀须同时支持 API 与 Release 附件。清空为直连；不关闭 TLS、不在代理失败时偷切直连。每次 CDN 跳转仍按配置代理转发，逻辑目的地只允许本仓库官方 API/附件及 GitHub 附件 CDN，无账号 token/cookie。
+- 点击“更新”后 UpdatePackages 前台串行下载，暂停资源传输/列表缩略图，不与播放并行；离开前台取消并等待 IO 退出。64 KiB 缓冲、APK 上限 64 MiB、磁盘余量 64 MiB，目录私有 `files/updates/staging` / `ready`，不混入用户下载。完整长度、可用的 GitHub SHA-256、ZIP 元数据预算、包名/版本/更高 versionCode、非 debuggable 及固定签名信息均须检查；系统安装器再做实际 APK 签名验证和用户确认。损坏缓存不复用，取消不成为 ready。
+- 新增 REQUEST_INSTALL_PACKAGES 是用户本轮指定更新流程的必要权限，不是静默安装授权。Android 8+ 未授权时引导“允许此来源”，返回后继续安装；已授权则下载完成直接请求系统安装器。使用不可导出的 FileProvider，只共享 updates/ready 子目录，content:// + 临时只读授权，显式选系统安装处理程序；不暴露站点/会话/其他私有文件。保留包名和证书，不建议卸载/清数据。
+- 更新测试：先 `node tools/prepare-update-fixture.mjs`，再构建/安装 AndroidTest，运行 `node tools/update-flow-device-tests.mjs`。工具只使用原有兼容签名生成 androidTest 私有校验 APK；**fixture 没有应用代码/启动器，不得安装、发布或当成用户测试包**。设备脚本只允许专用模拟器，在 instrumentation 之外切换/恢复安装 AppOp；Android 撤销此授权会杀进程，不能在测试体 finally 中切权限，否则会把系统行为误当崩溃。Gate/代理/分页的 JVM 测试和 tools/update-settings-{ui,upgrade}-smoke.mjs 覆盖本轮行为。宽 Switch 的 TV 焦点需要显式 verticalFocus 顺序。
 - 依赖更新须 `:app:exportNoticeInputs` + `node tools/generate-notices.mjs`，审阅新增许可证。完整许可在 APK 设置中；desugar_jdk_libs 2.1.5 的上游源码归档独立随 Release 提供。
 - 自有代码许可证未指定，不擅自标 MIT/Apache/GPL；第三方授权见 NOTICE.md，不受此状态影响。
 
