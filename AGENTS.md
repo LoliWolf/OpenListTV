@@ -70,6 +70,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 每次继续通过原站点/账号重新 fs/get；下载客户端及每次重定向不携带 API 凭证。续传必须核对强 ETag、最终 URL 的 SHA-256（不保存原 URL）、Content-Range 起止/总长；无法核对就完整重下，不能盲目追加。替换流须先截断旧文件再记录新 validator。
 - 下载位于应用私有 `files/downloads`；UUID 文件名、`.part` 未完成、原子 rename 为 `.media` 才算完成。独立 `downloads.db` v2（v1→v2 只加 source_key），最多 100 条记录，不保存 token/sign/thumb/raw_url。启动修复已 rename 但 DB 未提交的窄窗口，不能把 `.part` 判为完成。Catalog 仍 v2。
 - 本机下载可离线点播/前后项及按需导出，不需要 OpenList 在线鉴权；不自动组成离线轮播。`LocalDownloadGateway` 不访问网络，MediaEngine 用 DefaultDataSource 支持私有文件，ImagePipeline 只接收下载目录内的本地文件、直接采样不重复复制。
+- 下载操作可由文件行长按确认键、菜单键或触控长按打开，标准遥控不必有专用菜单键；已用实际 long-press D-pad OK 验证非首项菜单。不要破坏 View 原生长按事件或让键松开后误点播。
 - 用户明确下载的本机副本在清缓存、退出账号和覆盖安装时保留；卸载会删除。只在用户确认后删除精确 UUID 副本/记录；服务器不变。继续未完成下载必须匹配原站点 URL、账号和站点 ID。
 - 导出走系统 CreateDocument 授权（可选 U 盘/其他位置，取决于设备文件提供方），无广泛存储权限。不提供文件选择器的电视仍能本机离线打开。导出中断提醒目标可能有未完成文件，不擅自删除用户选中的外部文档。
 
