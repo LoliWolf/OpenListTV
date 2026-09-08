@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.content.*
 import android.os.SystemClock
 import android.widget.Button
+import android.widget.Switch
 import androidx.core.content.FileProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -37,7 +38,7 @@ class UpdateFlowTest {
         while (!condition()) { if (SystemClock.elapsedRealtime() >= end) fail("Timed out"); SystemClock.sleep(30) }
     }
     private fun fixtureBytes(): ByteArray = instrumentation.context.assets.open("update-validation.apk").use { it.readBytes() }
-    private fun release(bytes: ByteArray) = GithubRelease("1.0.1-preview.6", "https://github.com/LoliWolf/OpenListTV/releases/tag/v1.0.1-preview.6", "https://github.com/LoliWolf/OpenListTV/releases/download/v1.0.1-preview.6/OpenListTV-1.0.1-preview.6.apk", "Private fixture; never install", true, bytes.size.toLong(), MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) })
+    private fun release(bytes: ByteArray) = GithubRelease("1.0.1-preview.7", "https://github.com/LoliWolf/OpenListTV/releases/tag/v1.0.1-preview.7", "https://github.com/LoliWolf/OpenListTV/releases/download/v1.0.1-preview.7/OpenListTV-1.0.1-preview.7.apk", "Private fixture; never install", true, bytes.size.toLong(), MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) })
     private inner class Fixture : AutoCloseable {
         val id = UUID.randomUUID().toString()
         val root = File(context.filesDir, "updates/ready/test-$id")
@@ -49,6 +50,108 @@ class UpdateFlowTest {
             runBlocking { packages.cancelAndJoin() }; server.shutdown()
             root.deleteRecursively(); isolated.getSharedPreferences("github-updates", Context.MODE_PRIVATE).edit().clear().commit()
         }
+    }
+    private fun browserTest(block: (MainActivity, Fixture, SharedPreferences, MutableList<UpdateController>) -> Unit) {
+        val appPrefs = context.getSharedPreferences("github-updates", Context.MODE_PRIVATE)
+        val oldAuto = appPrefs.getBoolean("automatic", true)
+        appPrefs.edit().putBoolean("automatic", false).commit()
+        try {
+            Fixture().use { f ->
+                val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
+                val controllers = mutableListOf<UpdateController>()
+                try { block(activity, f, f.isolated.getSharedPreferences("github-updates", Context.MODE_PRIVATE), controllers) }
+                finally { main { controllers.forEach { it.background() }; activity.finish() } }
+            }
+        } finally { appPrefs.edit().putBoolean("automatic", oldAuto).commit() }
+    }
+    @Test fun browserSwitchDefaultsOffPersistsAndCancelsPendingNativeHandoff() = browserTest { activity, f, prefs, controllers ->
+        prefs.edit().putBoolean("automatic", false).putBoolean("permission.pending", true).commit()
+        main {
+            val controller = UpdateController(activity, { true }, packageStore = f.packages, prefs = prefs)
+            controllers += controller
+            assertFalse(controller.browserDownload)
+            val form = TvUi.column(activity); controller.addSettings(form)
+            val toggle = (0 until form.childCount).map { form.getChildAt(it) }.filterIsInstance<Switch>()
+                .single { it.text == "使用浏览器下载" }
+            assertTrue(toggle.isFocusable); assertFalse(toggle.isChecked)
+            toggle.performClick()
+            assertTrue(controller.browserDownload); assertFalse(prefs.contains("permission.pending"))
+            val restored = UpdateController(activity, { true }, packageStore = f.packages, prefs = prefs,
+                intentLauncher = { fail("Browser mode must not resume native installation") })
+            controllers += restored
+            assertTrue(restored.browserDownload)
+            prefs.edit().putBoolean("permission.pending", true).putLong("permission.time", System.currentTimeMillis()).commit()
+            restored.onResume()
+            assertFalse(prefs.contains("permission.pending"))
+            restored.browserDownload = false
+            assertFalse(controller.browserDownload)
+        }
+        assertEquals(0, f.server.requestCount)
+    }
+    @Test fun browserDownloadOpensApkAndPreservesOnlyHttpsPrefixWithoutNativeWork() = browserTest { activity, f, prefs, controllers ->
+        val offer = release(fixtureBytes())
+        val intents = mutableListOf<Intent>()
+        main {
+            val controller = UpdateController(activity, { true },
+                beforeDownload = { fail("Browser mode must not start app transfer") },
+                afterDownload = { fail("Browser mode must not finish an app transfer") },
+                networkFactory = { fail("Browser mode must not create a network client"); f.network },
+                intentLauncher = { intents += it }, packageStore = f.packages, prefs = prefs)
+            controllers += controller; controller.browserDownload = true
+            for ((mode, address) in listOf(UpdateProxyMode.NETWORK to "", UpdateProxyMode.NETWORK to "http://127.0.0.1:9",
+                UpdateProxyMode.NETWORK to "socks5://127.0.0.1:9", UpdateProxyMode.PREFIX to "https://updates.example/proxy/")) {
+                prefs.edit().putString("proxy.mode", mode.name).putString("proxy.address", address).commit()
+                controller.beginUpdate(offer)
+                val intent = intents.last()
+                assertEquals(Intent.ACTION_VIEW, intent.action)
+                assertTrue(intent.hasCategory(Intent.CATEGORY_BROWSABLE)); assertNull(intent.type)
+                assertNull(intent.clipData); assertNull(intent.extras); assertNull(intent.component)
+                assertEquals(0, intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                assertEquals((if (mode == UpdateProxyMode.PREFIX) address else "") + offer.apkUrl, intent.data.toString())
+                assertFalse(controller.downloading)
+            }
+            assertEquals(4, intents.size)
+        }
+        assertEquals(0, f.server.requestCount); assertNull(runBlocking { f.packages.cached() })
+    }
+    @Test fun missingBrowserOffersCopyLinkWithoutFallingBackToNativeDownload() = browserTest { activity, f, prefs, controllers ->
+        val offer = release(fixtureBytes())
+        main {
+            val controller = UpdateController(activity, { true }, beforeDownload = { fail("Unexpected download") },
+                intentLauncher = { throw ActivityNotFoundException("No browser") }, packageStore = f.packages, prefs = prefs)
+            controllers += controller; controller.browserDownload = true
+            controller.beginUpdate(offer)
+            val dialog = UpdateController::class.java.getDeclaredField("dialog").apply { isAccessible = true }.get(controller) as AlertDialog
+            assertTrue(dialog.isShowing)
+            assertTrue(dialog.findViewById<android.widget.TextView>(android.R.id.message).text.contains(offer.apkUrl!!))
+            assertEquals("复制链接", dialog.getButton(AlertDialog.BUTTON_POSITIVE).text)
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            assertFalse(controller.downloading)
+        }
+        // AlertDialog posts the click listener; clipboard reads also require window focus.
+        eventually {
+            var copied = false
+            main {
+                val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                copied = clipboard.primaryClip?.getItemAt(0)?.text?.toString() == offer.apkUrl
+            }
+            copied
+        }
+        assertEquals(0, f.server.requestCount); assertNull(runBlocking { f.packages.cached() })
+    }
+    @Test fun browserModeRejectsUntrustedOrMissingApkAndOlderVersion() = browserTest { activity, f, prefs, controllers ->
+        val offer = release(fixtureBytes())
+        main {
+            val controller = UpdateController(activity, { true }, beforeDownload = { fail("Unexpected download") },
+                intentLauncher = { fail("Invalid release must not launch") }, packageStore = f.packages, prefs = prefs)
+            controllers += controller; controller.browserDownload = true
+            listOf(offer.copy(apkUrl = "https://untrusted.example/file.apk"), offer.copy(apkUrl = null),
+                offer.copy(version = "1.0.0", pageUrl = offer.pageUrl.replace(offer.version, "1.0.0"),
+                    apkUrl = offer.apkUrl!!.replace(offer.version, "1.0.0"))).forEach { controller.beginUpdate(it) }
+            assertFalse(controller.downloading)
+        }
+        assertEquals(0, f.server.requestCount)
     }
     @Test fun verifiesSignedNewerPackageCachesItAndExposesOnlyReadyFile() = runBlocking<Unit> {
         Fixture().use { f ->
@@ -66,7 +169,7 @@ class UpdateFlowTest {
         Fixture().use { f ->
             val bytes = fixtureBytes(); val valid = release(bytes)
             f.server.enqueue(MockResponse().setBody(Buffer().write(bytes))); val previous = f.packages.obtain(valid, f.network)
-            for ((offer, body) in listOf(valid.copy(sha256 = "0".repeat(64)) to bytes, valid.copy(version = "1.0.1-preview.7", pageUrl = valid.pageUrl.replace("preview.6", "preview.7"), apkUrl = valid.apkUrl!!.replace("preview.6", "preview.7")) to bytes, valid.copy(size = 3, sha256 = null) to byteArrayOf(1,2,3))) {
+            for ((offer, body) in listOf(valid.copy(sha256 = "0".repeat(64)) to bytes, valid.copy(version = "1.0.1-preview.8", pageUrl = valid.pageUrl.replace("preview.7", "preview.8"), apkUrl = valid.apkUrl!!.replace("preview.7", "preview.8")) to bytes, valid.copy(size = 3, sha256 = null) to byteArrayOf(1,2,3))) {
                 f.server.enqueue(MockResponse().setBody(Buffer().write(body)))
                 try { f.packages.obtain(offer, f.network); fail("Bad package accepted") } catch (_: Exception) { }
                 assertTrue(previous.isFile); assertEquals(previous, f.packages.cached()!!.second)

@@ -11,6 +11,6 @@ try {
  await run('shell','appops','set',app,'REQUEST_INSTALL_PACKAGES','default');
  await tests(`${app}.UpdateFlowTest#downloadAutomaticallyRequestsSystemInstallerButNeverConfirmsInstallation`,1);
  await run('shell','appops','set',app,'REQUEST_INSTALL_PACKAGES','allow');
- await tests(`${app}.UpdateFlowTest`,8);
+ await tests(`${app}.UpdateFlowTest`,12);
 } finally { await run('shell','appops','set',app,'REQUEST_INSTALL_PACKAGES',previous); }
 console.log('PASS installer permission denied/granted/return paths; original AppOp restored after instrumentation');

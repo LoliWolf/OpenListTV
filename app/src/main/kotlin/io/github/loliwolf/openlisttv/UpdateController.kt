@@ -19,6 +19,7 @@ import io.github.loliwolf.openlisttv.core.UpdateLaunchGate
 import io.github.loliwolf.openlisttv.data.*
 import kotlinx.coroutines.*
 import java.io.File
+import okhttp3.HttpUrl.Companion.toHttpUrl
 
 /** User-initiated installation only; no background service or silent installation. */
 class UpdateController(
@@ -47,6 +48,14 @@ class UpdateController(
     var testing: Boolean
         get() = prefs.getBoolean("testing", false)
         set(value) { prefs.edit().putBoolean("testing", value).apply(); configurationChanged() }
+    var browserDownload: Boolean
+        get() = prefs.getBoolean("browser.download", false)
+        set(value) {
+            // Do not resume a previous native installer handoff after switching modes.
+            prefs.edit().putBoolean("browser.download", value).apply {
+                if (value) remove("permission.pending")
+            }.apply()
+        }
     private fun savedProxy(): UpdateProxy = UpdateProxy(runCatching { UpdateProxyMode.valueOf(prefs.getString("proxy.mode", "NETWORK")!!) }.getOrDefault(UpdateProxyMode.NETWORK), prefs.getString("proxy.address", "").orEmpty())
     private fun proxy() = savedProxy().normalized()
     private fun configurationChanged() { checkJob?.cancel(); pending = null; pendingMessage = null; gate.request(); activity.window.decorView.post { foreground() } }
@@ -58,13 +67,13 @@ class UpdateController(
         if (prefs.getBoolean("permission.pending", false)) {
             val recent = System.currentTimeMillis() - prefs.getLong("permission.time", 0) in 0..15 * 60_000L
             prefs.edit().remove("permission.pending").apply()
-            if (recent && allowedToInstall()) activity.lifecycleScope.launch {
+            if (recent && allowedToInstall() && !browserDownload) activity.lifecycleScope.launch {
                 try {
                     val ready = packages.cached()
                     if (ready != null && activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) launchInstaller(ready.second)
                     else notice("更新包已失效，请重新检查更新")
                 } catch (e: CancellationException) { throw e } catch (_: Exception) { notice("无法读取已下载更新，请重新检查更新") }
-            } else notice("安装授权未开启或已过期；更新包保留，再点更新即可继续安装")
+            } else if (!browserDownload) notice("安装授权未开启或已过期；更新包保留，再点更新即可继续安装")
         }
         foreground()
     }
@@ -106,12 +115,24 @@ class UpdateController(
     }
     private fun autoNotice(text: String) { if (canPromptAutomatically()) notice(text) else pendingMessage = text }
     private fun offer(release: GithubRelease) {
+        val route = if (browserDownload) "当前使用浏览器下载：点击更新会打开 APK 下载链接，保存位置和后续安装由浏览器及系统处理。" else "点击更新后下载安装包并打开系统安装界面；安装仍需你确认。"
         show(AlertDialog.Builder(activity).setTitle("发现${if (release.prerelease) "测试" else "正式"}版本 ${release.version}")
-            .setMessage("当前版本：${BuildConfig.VERSION_NAME}\n\n${release.notes.take(1200)}\n\n点击更新后下载安装包并打开系统安装界面；安装仍需你确认。覆盖安装保留配置，不要卸载。")
+            .setMessage("当前版本：${BuildConfig.VERSION_NAME}\n\n${release.notes.take(1200)}\n\n$route\n覆盖安装保留配置，不要卸载。")
             .setPositiveButton("更新") { _, _ -> beginUpdate(release) }.setNeutralButton("版本说明") { _, _ -> openLink(release.pageUrl) }.setNegativeButton("稍后", null).create())
     }
     internal fun beginUpdate(release: GithubRelease) {
         if (downloading || !activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        if (browserDownload) {
+            try {
+                if (GithubUpdates.decodeCache(GithubUpdates.encode(release), true) != release || release.apkUrl == null || !release.newerThan(BuildConfig.VERSION_NAME)) throw UpdateFailure("没有有效的新版本 APK 下载链接")
+                val config = proxy()
+                val url = config.route(checkNotNull(release.apkUrl).toHttpUrl()).toString()
+                if (config.mode == UpdateProxyMode.NETWORK && config.address.isNotEmpty()) notice("浏览器使用自身网络设置，不会继承应用内 HTTP / SOCKS5 代理")
+                prefs.edit().remove("permission.pending").apply()
+                openLink(url, apk = true)
+            } catch (e: UpdateFailure) { notice(e.message ?: "无法打开更新链接") }
+            return
+        }
         val body = TvUi.column(activity).apply { setPadding(activity.dp(20), activity.dp(12), activity.dp(20), activity.dp(12)) }
         val progress = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 1000; isIndeterminate = true }
         val label = TvUi.text(activity, "准备更新包…", 15f)
@@ -167,11 +188,15 @@ class UpdateController(
         try { intentLauncher(intent) }
         catch (_: Exception) { external = false; prefs.edit().remove("permission.pending").apply(); notice("系统未提供此操作入口；请到系统设置检查安装权限") }
     }
-    private fun openLink(url: String) {
-        try { external = true; intentLauncher(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    private fun openLink(url: String, apk: Boolean = false) {
+        try {
+            external = true
+            intentLauncher(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { if (apk) addCategory(Intent.CATEGORY_BROWSABLE) })
+        }
         catch (_: Exception) {
             external = false
-            show(AlertDialog.Builder(activity).setTitle("发布页链接").setMessage(url).setPositiveButton("复制链接") { _, _ ->
+            val message = if (apk) "未能打开可用浏览器。可复制 APK 下载链接，在浏览器或其他设备下载后覆盖安装。\n\n$url" else url
+            show(AlertDialog.Builder(activity).setTitle(if (apk) "APK 下载链接" else "发布页链接").setMessage(message).setPositiveButton("复制链接") { _, _ ->
                 runCatching { (activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("OpenList TV 更新", url)) }
             }.setNegativeButton("关闭", null).create())
         }
@@ -192,6 +217,8 @@ class UpdateController(
         }
         content.addView(toggle("自动检测更新（每次启动）", automatic) { automatic = it })
         content.addView(toggle("参与测试版本", testing) { testing = it })
+        content.addView(toggle("使用浏览器下载", browserDownload) { browserDownload = it })
+        content.addView(TvUi.text(activity, "开启后点更新只打开 APK 下载链接，不在应用内下载或唤起安装。保存位置由浏览器决定；HTTP/SOCKS5 代理不会带入浏览器，HTTPS 加速前缀会保留。", 13f, TvUi.muted))
         val proxyStatus = TvUi.text(activity, "", 13f, TvUi.muted)
         fun refresh() { proxyStatus.text = runCatching { proxy().let { if (it.address.isEmpty()) "更新代理：未配置（直连）" else "更新代理：${it.mode.label} · ${it.address}" } }.getOrDefault("更新代理配置无效，请修改或清除") }
         refresh()

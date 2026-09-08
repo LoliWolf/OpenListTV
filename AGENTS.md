@@ -6,7 +6,7 @@
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
 - 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListTV`，稳定 Release 标签 `v1.0.0`。
-- 当前开发分支 `dev/1.0.1`，已公开预发布 `1.0.1-preview.4` / versionCode `8`；本地迭代 `1.0.1-preview.5` / versionCode `9`。preview.4 的 GitHub 授权不延伸到 preview.5 或正式 1.0.1：本轮只本地开发交付，不推送/建标签/发布。已公开 preview.4 保持 prerelease、非 Latest，稳定版仍为 v1.0.0。旧 APK 不覆盖，后续 versionCode 继续递增。
+- 当前开发分支 `dev/1.0.1`，已公开预发布 `1.0.1-preview.4` / versionCode `8`；本地迭代 `1.0.1-preview.6` / versionCode `10`。preview.4 的 GitHub 授权不延伸到之后预览版或正式 1.0.1：本轮只本地开发交付，不推送/建标签/发布。已公开 preview.4 保持 prerelease、非 Latest，稳定版仍为 v1.0.0。旧 APK 不覆盖，后续 versionCode 继续递增。
 - 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
 - 负责人于 2026-09-07 确认 1.0.0 已实测验收。公开文档保持产品功能与必要限制，不列待验证清单；历史工程记录保存在本机忽略的 artifacts/engineering-history 中，不编造额外测试结论。
@@ -110,6 +110,8 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - GitHub CLI 已安装；`node tools/gh.mjs ...` 通过现有 Git 凭证调用，不输出或保存 token。发布账号 LoliWolf；公共提交使用 GitHub noreply 邮箱，避免暴露私人邮箱。
 - CI 只有读取权限，执行测试/lint/debug 构建，不持有生产签名。
 - preview.3 按用户明确要求替换旧“每天一次、仅稳定版、浏览器下载”更新行为：设置有“自动检测更新（每次启动）”“参与测试版本”开关，以及仅更新使用的代理。原 automatic 偏好沿用，testing 默认 false；不再用 lastAttempt/ETag 缓存跳过启动检查。
+- preview.6 新增“使用浏览器下载”开关，默认 false；沿用 `github-updates` 偏好新增 `browser.download`，重启/覆盖升级保留。开启后点击更新仅用 ACTION_VIEW + CATEGORY_BROWSABLE 打开已验证的本仓库新版 APK HTTPS 链接，不启动 UpdatePackages/资源暂停/安装授权；清除旧 permission.pending，返回应用不续装。关闭后沿用原应用内下载校验安装流程。
+- 浏览器使用自身网络，无法继承应用 HTTP/SOCKS5 代理；HTTPS 加速前缀可保留在 URL 中。保存位置、下载和安装由浏览器及系统处理，无浏览器则展示/复制链接，不偷偷回退应用内下载。不新增依赖、权限或后台任务。UpdateFlowTest 覆盖链接/代理/缺浏览器/无效版本及偏好；更新设置 UI/覆盖脚本包含新开关。
 - UpdateLaunchGate 每次进入应用仅检查一次，翻目录/窗口焦点/旋转不重复；系统安装/授权流程返回不重复。新版本弹窗，无新版或失败轻提示；播放或其他模态界面内延后提示。草稿和 Actions 构建产物不纳入“测试版本”。
 - GithubUpdates 分页读取官方 `/repos/LoliWolf/OpenListTV/releases`，按 SemVer 选最高的可用 APK，不以列表首项/上传时间作为最高版本；可选正式＋预发布。每页最多 30 条 / 2 MiB，最多 50 页 / 60 秒，触及上限报检查失败而非声称最新。只保留当前页和最佳候选。
 - UpdateNetwork 与 OpenList/媒体客户端完全隔离，不修改系统 ProxySelector、Authenticator 或全局代理。支持不含账号密码的 http://host:port、socks5://host:port；另有 HTTPS GitHub 加速前缀模式，前缀须同时支持 API 与 Release 附件。清空为直连；不关闭 TLS、不在代理失败时偷切直连。每次 CDN 跳转仍按配置代理转发，逻辑目的地只允许本仓库官方 API/附件及 GitHub 附件 CDN，无账号 token/cookie。
