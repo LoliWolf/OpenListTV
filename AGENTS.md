@@ -6,7 +6,7 @@
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
 - 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListTV`，稳定 Release 标签 `v1.0.0`。
-- 当前开发分支 `dev/1.0.1`，已公开预发布 `1.0.1-preview.4` / versionCode `8`；本地迭代 `1.0.1-preview.6` / versionCode `10`。preview.4 的 GitHub 授权不延伸到之后预览版或正式 1.0.1：本轮只本地开发交付，不推送/建标签/发布。已公开 preview.4 保持 prerelease、非 Latest，稳定版仍为 v1.0.0。旧 APK 不覆盖，后续 versionCode 继续递增。
+- 当前开发分支 `dev/1.0.1`，当前预发布版本 `1.0.1-preview.7` / versionCode `11`，功能与本地 preview.6 一致。用户本轮明确授权推送该分支并发布 GitHub 预发布版 `v1.0.1-preview.7`，用于从 preview.6 验证更新；该授权取代此前仅本地限制，但不延伸到之后版本或正式 1.0.1。保持 prerelease、非 Latest，稳定版仍为 v1.0.0。旧 APK/标签不覆盖，后续 versionCode 继续递增。
 - 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
 - 负责人于 2026-09-07 确认 1.0.0 已实测验收。公开文档保持产品功能与必要限制，不列待验证清单；历史工程记录保存在本机忽略的 artifacts/engineering-history 中，不编造额外测试结论。
