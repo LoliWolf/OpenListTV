@@ -32,6 +32,20 @@ class CatalogTest {
         assertEquals(50, first.toSet().size); assertNull(catalog.shuffled("a", 1, false))
         assertNotNull(catalog.shuffled("a", 2, false))
     }
+    @Test fun rejectedScanBatchRollsBackAndKeepsUniformRowIdsDense() {
+        val generation = catalog.startScan("/", "a")
+        val first = Entry("/1.jpg", "1.jpg", false); val second = Entry("/2.jpg", "2.jpg", false)
+        catalog.appendScan(generation, "a", "/", listOf(first), SlideshowOptions())
+        assertThrows(android.database.sqlite.SQLiteConstraintException::class.java) {
+            catalog.appendScan(generation, "a", "/", listOf(second, first), SlideshowOptions())
+        }
+        assertEquals(1, catalog.scannedCount(generation))
+        catalog.appendScan(generation, "a", "/", listOf(second), SlideshowOptions())
+        assertEquals(2, catalog.scannedCount(generation))
+        repeat(100) { assertNotNull(catalog.shuffled("a", 1, true, generation)) }
+        val rows = catalog.readableDatabase.rawQuery("SELECT rowid FROM scan_items ORDER BY rowid", null).use { c -> buildList { while (c.moveToNext()) add(c.getInt(0)) } }
+        assertEquals(listOf(1, 2), rows)
+    }
     @Test fun searchAndTypeFilterAreLiteralLocalAndPaged() {
         catalog.begin("a", "/")
         val entries = (1..251).map { Entry("/photo$it.PNG", "photo$it.PNG", false) } + listOf(

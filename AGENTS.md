@@ -6,7 +6,7 @@
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
 - 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListTV`，稳定 Release 标签 `v1.0.0`。
-- 当前开发分支 `dev/1.0.1`，当前预发布版本 `1.0.1-preview.7` / versionCode `11`，功能与本地 preview.6 一致。用户本轮明确授权推送该分支并发布 GitHub 预发布版 `v1.0.1-preview.7`，用于从 preview.6 验证更新；该授权取代此前仅本地限制，但不延伸到之后版本或正式 1.0.1。保持 prerelease、非 Latest，稳定版仍为 v1.0.0。旧 APK/标签不覆盖，后续 versionCode 继续递增。
+- 当前开发分支 `dev/1.0.1`，已公开预发布 `1.0.1-preview.7` / versionCode `11`；本地迭代 `1.0.1-preview.8` / versionCode `12`，优化大目录索引和全树轮播。用户的 preview.7 发布授权不延伸到 preview.8 或正式版：本轮只本地交付，不推送/建标签/发布。公开 preview.7 为 prerelease、非 Latest，稳定版仍为 v1.0.0。旧 APK/标签不覆盖，后续 versionCode 继续递增。
 - 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
 - 负责人于 2026-09-07 确认 1.0.0 已实测验收。公开文档保持产品功能与必要限制，不列待验证清单；历史工程记录保存在本机忽略的 artifacts/engineering-history 中，不编造额外测试结论。
@@ -45,7 +45,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 ### 资源预算与播放
 
 - 目录每页 100 条，UI/缩略图只保留当前页＋下一页，滚动后淘汰旧页。完整排序的元数据可索引全目录，不等于下载全目录图片。
-- 索引最多 100,000 条 / 64 MiB，深度最多 128；目录变化、截断和达到上限必须提示。
+- 索引数据库总计仍最多 64 MiB，浏览完整排序条目和精简轮播候选各有 100,000 条上限，深度最多 128；目录变化、截断和达到上限必须提示。候选不再依赖浏览 entries；到预算后只循环已发现项，不声称覆盖全库。
 - 缩略图最多 2 并发，内存 LRU 8 MiB，PNG 磁盘缓存 16 MiB；无 thumb 时只为可见项串行生成原图预览。
 - 1.0.1 图片临时输入最多 128 MiB，保留至少 8 MiB 磁盘余量；列表原图回退仍限 32 MiB，避免为小缩略图下载巨型原图。音视频缓冲目标仍为 24 MiB，只有一个播放器。
 - 单文件超限属于 RESOURCE_LIMIT，轮播应跳过；真实磁盘/索引容量故障属于 CAPACITY，暂停。不能再次把图片超限归入全局容量故障。
@@ -68,7 +68,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 下载使用 Application 生命周期的单任务协调器，防止 Activity 重建创建第二个写入者；MainActivity.onStop 必须取消任务。没有 Service/WorkManager/后台常驻/自动续传，播放前必须 cancel + join 写入者。取消 IO 后的状态落盘和释放 slot 必须整体处于 NonCancellable 中，避免从 IO 返回时的 prompt cancellation 卡住 busy。
 - `FileDownloader` 64 KiB 流式缓冲、进度最多每 500 ms 一次、保留至少 64 MiB 磁盘余量。仅单文件；不打包 HLS/DASH 分片，不支持整目录下载。图片显示仍遵守 128 MiB 输入及双图位图预算，下载本身不使用该图片大小上限。
 - 每次继续通过原站点/账号重新 fs/get；下载客户端及每次重定向不携带 API 凭证。续传必须核对强 ETag、最终 URL 的 SHA-256（不保存原 URL）、Content-Range 起止/总长；无法核对就完整重下，不能盲目追加。替换流须先截断旧文件再记录新 validator。
-- 下载位于应用私有 `files/downloads`；UUID 文件名、`.part` 未完成、原子 rename 为 `.media` 才算完成。独立 `downloads.db` v2（v1→v2 只加 source_key），最多 100 条记录，不保存 token/sign/thumb/raw_url。启动修复已 rename 但 DB 未提交的窄窗口，不能把 `.part` 判为完成。Catalog 仍 v2。
+- 下载位于应用私有 `files/downloads`；UUID 文件名、`.part` 未完成、原子 rename 为 `.media` 才算完成。独立 `downloads.db` v2（v1→v2 只加 source_key），最多 100 条记录，不保存 token/sign/thumb/raw_url。启动修复已 rename 但 DB 未提交的窄窗口，不能把 `.part` 判为完成。Catalog 后于 preview.8 升级为 v3，不影响下载库。
 - 本机下载可离线点播/前后项及按需导出，不需要 OpenList 在线鉴权；不自动组成离线轮播。`LocalDownloadGateway` 不访问网络，MediaEngine 用 DefaultDataSource 支持私有文件，ImagePipeline 只接收下载目录内的本地文件、直接采样不重复复制。
 - 下载操作可由文件行长按确认键、菜单键或触控长按打开，标准遥控不必有专用菜单键；已用实际 long-press D-pad OK 验证非首项菜单。不要破坏 View 原生长按事件或让键松开后误点播。
 - 用户明确下载的本机副本在清缓存、退出账号和覆盖安装时保留；卸载会删除。只在用户确认后删除精确 UUID 副本/记录；服务器不变。继续未完成下载必须匹配原站点 URL、账号和站点 ID。
@@ -87,9 +87,20 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 ## 数据与升级：不可破坏
 
 - versionCode 必须单调增加；包名、签名、SharedPreferences 名称 `sites` / `sessions.encrypted`、Keystore alias `openlisttv.sessions.v1` 保持兼容。
-- SQLite 当前版本 2；v1→v2 只增加 thumbnail 列。以后必须增量迁移，不能删表重建。
+- Catalog SQLite 当前版本 3；v1→v2 只增加 thumbnail 列，v2→v3 只为 scan_items 增加 size / modified 两列。downloads.db 仍为 v2。必须增量迁移，不能删表重建。
 - 普通重连/清缓存保留配置与播放进度；退出账号或明确替换账号/服务器身份才清原身份历史。
 - 不通过卸载、pm clear、重置密钥来解决用户升级问题。清数据开关只允许专用模拟器的合成 fixture 测试。
+
+### preview.8 大目录索引与轮播
+
+- 旧“扫描无法继续，请清理索引或缩小范围”是通用兜底，不能据此断言用户磁盘满；旧全树扫描先 ensure 整目录，再逐条 autocommit 插入 scan_items，选图 ORDER BY random() 并联结 entries，多个大目录共用条目限额导致中断。
+- FileRepository.scanPages 串行请求每页最多 500 条元数据，维持 4 MiB 响应预算；服务端缩小分页或单次元数据超限时，消费前以正确 offset 回退每页 100 条。总数变化、重复项、短页/空页不完整仍报错，不静默漏项。UI/缩略图仍每页100、当前加下一页，没有按500加载图片。
+- 浏览 entries 按页复用 prepared INSERT / 单事务；条目数量缓存避免每页全表 COUNT。超出全局浏览缓存时淘汰非当前目录的旧目录，只删索引，不删 progress/账号/下载。过滤 COUNT 为最多128项有界缓存，写入/淘汰后失效；遍历 DirectoryReader 仅缓存2个100条窗口，不再每一张都排序/统计整目录。
+- 全树扫描不调用 ensure，也不重复保存缩略图、sign；直接将每页可播文件的 path/size/modified 写入 scan_items，首批提交即可播。只保留一页网络元数据；每页让出 IO 机会，继续图片自动 OneAhead。候选与浏览索引独立，淘汰浏览目录不丢候选。
+- 扫描中按稠密 ROWID 均匀抽取，完成后使用 (round,shuffle_key) 索引选择未播放项；每轮不重复。禁止往 scan_items 加 AUTOINCREMENT、逐条 DELETE 或 INSERT OR IGNORE，否则稠密 ROWID 假设失效。队列处理完删除该节点，不累积已完成节点；路径严格下行且有深度/数量上限。
+- reserveScan 在异步初始化前取得代次，所有异步队列/候选操作核对代次；旧任务取消后不能清空或污染新会话。扫描状态采样与轮次切换必须使用同一快照，避免空表转完成时误跳轮次。
+- IndexBudgetReached 仅表示软件索引限额；为后续轮次更新留512KiB以上磁盘预算。达到条目/深度/数据库预算后停止新增，但继续已发现资源，并在控制栏及一次提示中明确未覆盖全部范围。不自动遍历超限后剩余目录；不是无限库保证。实际磁盘空间不足/IO故障、鉴权、限流、网络错误仍暂停，不伪装成预算可继续。
+- data/LargeLibraryTest 覆盖4×3万文件、容量边界后继续、首批先播、精简索引/浏览淘汰/进度保留、三轮不重复、代次取消、分页回退与失败分类；SeamlessSlideshowTest 增加3万文件边扫描边播放的实际帧/像素回归。测试均使用专用模拟器与合成资源，不表述成极米实测速度。
 
 ## 构建与本机工具
 

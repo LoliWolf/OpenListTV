@@ -70,12 +70,18 @@ class OpenListApi(private val client: OkHttpClient = HttpClients.api()) : AuthPr
     }
     override suspend fun logout(session: Session) { request(session.site, "auth/logout", null, session.token) }
     override suspend fun list(session: Session, path: String, password: String, page: Int, perPage: Int): Listing {
-        require(page > 0 && perPage in 1..Budgets.PAGE)
+        require(page > 0 && perPage in 1..Budgets.INDEX_PAGE)
         val dto = json.decodeFromJsonElement<ListDto>(request(session.site, "fs/list", json.encodeToString(ListBody(path, password, page, perPage)), session.token))
-        if (dto.total < 0 || dto.total > Budgets.MAX_ENTRIES || (dto.content?.size ?: 0) > perPage) throw ClientFailure(FailureKind.CAPACITY, "目录超出 10 万条索引限制或服务端未遵守分页")
+        if (dto.total < 0 || (dto.content?.size ?: 0) > perPage) throw ClientFailure(FailureKind.SERVER, "服务端未遵守分页或返回无效总数")
+        var expandedBytes = 0L
         val entries = dto.content.orEmpty().mapIndexed { index, f ->
             if (f.name.length > 4096) throw ClientFailure(FailureKind.INVALID, "服务器返回的文件名过长")
-            try { Entry(Paths.child(path, f.name), f.name, f.is_dir, f.size, f.modified, f.sign, (page - 1) * perPage + index, f.thumb) }
+            try {
+                val child = Paths.child(path, f.name)
+                expandedBytes += (child.length.toLong() + f.name.length + f.modified.length + f.sign.length + f.thumb.length) * 2
+                if (expandedBytes > Budgets.METADATA_RESPONSE_BYTES) throw ClientFailure(FailureKind.RESOURCE_LIMIT, "目录路径展开超过单页元数据预算")
+                Entry(child, f.name, f.is_dir, f.size, f.modified, f.sign, (page - 1) * perPage + index, f.thumb)
+            }
             catch (_: IllegalArgumentException) { throw ClientFailure(FailureKind.INVALID, "服务器返回了无效路径") }
         }
         return Listing(entries, dto.total)
@@ -120,10 +126,10 @@ suspend fun Call.readText(limit: Long): String = suspendCancellableCoroutine { c
             try {
                 response.use {
                     if (!it.isSuccessful) throw OpenListApi.failure(it.code)
-                    if (it.body.contentLength() > limit) throw ClientFailure(FailureKind.CAPACITY, "服务器响应超过安全大小限制")
+                    if (it.body.contentLength() > limit) throw ClientFailure(FailureKind.RESOURCE_LIMIT, "服务器响应超过安全大小限制")
                     val source = it.body.source()
                     source.request(limit + 1)
-                    if (source.buffer.size > limit) throw ClientFailure(FailureKind.CAPACITY, "服务器响应超过安全大小限制")
+                    if (source.buffer.size > limit) throw ClientFailure(FailureKind.RESOURCE_LIMIT, "服务器响应超过安全大小限制")
                     val value = source.readUtf8()
                     if (continuation.isActive) continuation.resume(value)
                 }

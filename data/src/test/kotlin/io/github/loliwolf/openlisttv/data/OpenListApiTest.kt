@@ -9,6 +9,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OpenListApiTest {
+    @Test fun indexingUsesLargerMetadataPagesWithoutLoadingWholeDirectory() = runTest {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"code":200,"data":{"content":[{"name":"1.jpg"}],"total":150000}}"""))
+            val session = Session(Site("one", "test", server.url("/").toString(), "u", true), "t")
+            val page = OpenListApi().list(session, "/", "", 1, Budgets.INDEX_PAGE)
+            assertEquals(150_000, page.total); assertEquals(1, page.entries.size)
+            assertTrue(server.takeRequest().body.readUtf8().contains("\"per_page\":500"))
+        }
+    }
+    @Test fun oversizedMetadataIsAResponseBudgetNotDiskCapacity() = runTest {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("{}").setHeader("Content-Length", Budgets.METADATA_RESPONSE_BYTES + 1))
+            val session = Session(Site("one", "test", server.url("/").toString(), "u", true), "t")
+            try { OpenListApi().list(session, "/", "", 1, 500); fail("Oversize response accepted") }
+            catch (e: ClientFailure) { assertEquals(FailureKind.RESOURCE_LIMIT, e.kind) }
+        }
+    }
     @Test fun loginUsesHashAndRawTokenWithDeploymentPrefix() = runTest {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("""{"code":200,"data":{"token":"test-token"}}"""))

@@ -30,6 +30,7 @@ interface DirectoryReader {
 }
 interface TraversalSource {
     val description: String
+    val warning: String? get() = null
     suspend fun next(): Entry?
     fun close() {}
 }

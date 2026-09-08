@@ -45,7 +45,7 @@ class SeamlessSlideshowTest {
         val end = SystemClock.elapsedRealtime() + timeout
         while (!condition()) { if (SystemClock.elapsedRealtime() > end) fail("Timed out waiting for condition"); SystemClock.sleep(30) }
     }
-    private inner class Fixture(val delaySecond: AtomicLong = AtomicLong(0), val badSecond: Boolean = false, val rateLimited: Boolean = false, val prefetch: Boolean = true, val oversizedSecond: Boolean = false) : AutoCloseable {
+    private inner class Fixture(val delaySecond: AtomicLong = AtomicLong(0), val badSecond: Boolean = false, val rateLimited: Boolean = false, val prefetch: Boolean = true, val oversizedSecond: Boolean = false, val largeShuffle: Boolean = false) : AutoCloseable {
         val requests = CopyOnWriteArrayList<Pair<String, Long>>()
         val frames = CopyOnWriteArrayList<Pair<String, Long>>()
         val violations = CopyOnWriteArrayList<String>()
@@ -68,21 +68,27 @@ class SeamlessSlideshowTest {
                     if (request.getHeader("Authorization") != null || request.getHeader("Cookie") != null) violations += "media credentials"
                     if (file == "2.png" && rateLimited) return MockResponse().setResponseCode(429)
                     if (file == "2.png" && oversizedSecond) return MockResponse().setBody(Buffer().write(bytes[file]!!)).setHeader("Content-Length", Budgets.IMAGE_DISK_BYTES + 1)
-                    val body = if (file == "2.png" && badSecond) byteArrayOf(1, 2, 3) else bytes[file]!!
+                    val body = if (file == "2.png" && badSecond) byteArrayOf(1, 2, 3) else bytes[file]
+                        ?: if (largeShuffle) bytes.values.elementAt(file.substringBefore('.').toInt() % 3) else error("Unknown fixture image")
                     return MockResponse().setBody(Buffer().write(body)).setBodyDelay(if (file == "2.png") delaySecond.get() else 0, TimeUnit.MILLISECONDS)
                 }
             }
             server.start()
             val entries = colors.keys.map { Entry("/$it", it, false, modified = "fixture") }
             val gateway = object : FileGateway {
-                override suspend fun list(session: Session, path: String, password: String, page: Int, perPage: Int) = Listing(entries, entries.size)
+                override suspend fun list(session: Session, path: String, password: String, page: Int, perPage: Int): Listing {
+                    if (!largeShuffle) return Listing(entries, entries.size)
+                    delay(40)
+                    val start = (page - 1) * perPage
+                    return Listing((start until minOf(start + perPage, 30_000)).map { Entry("/$it.png", "$it.png", false) }, 30_000)
+                }
                 override suspend fun resolve(session: Session, entry: Entry, password: String) = MediaSource(entry, server.url(entry.path).toString())
             }
             val repository = FileRepository(Session(Site("fixture", "fixture", server.url("/").toString(), "fixture", true), "unused"), gateway, catalog)
             activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
             var created: PlaybackPanel? = null
             onMain {
-                created = PlaybackPanel(activity, repository, catalog, "/", SortOrder(), SlideshowOptions(recursive = false, imageOnly = true, imageSeconds = 1, prefetch = prefetch), scope, {}, { null })
+                created = PlaybackPanel(activity, repository, catalog, "/", SortOrder(), SlideshowOptions(mode = if (largeShuffle) TraversalMode.SHUFFLE else TraversalMode.ORDERED, recursive = false, imageOnly = true, imageSeconds = 1, prefetch = prefetch), scope, {}, { null })
                 activity.setContentView(created!!)
             }
             panel = created!!; photo = panel.getChildAt(1) as ImageView; center = panel.getChildAt(2) as TextView
@@ -104,7 +110,7 @@ class SeamlessSlideshowTest {
                 }.also { panel.viewTreeObserver.addOnDrawListener(it) }
                 panel.start(null)
             }
-            waitImage("1.png")
+            if (largeShuffle) eventually { displayed().startsWith("图片 ") } else waitImage("1.png")
         }
         fun displayed(): String { var result = ""; onMain { result = photo.contentDescription?.toString().orEmpty() }; return result }
         fun waitImage(name: String) = eventually { displayed() == "图片 $name" }
@@ -152,6 +158,17 @@ class SeamlessSlideshowTest {
             val third = f.frames.first { it.first == "图片 3.png" }.second
             assertTrue("Dwell must start after actual display", third - second >= 900)
             assertTrue(f.violations.toString(), f.violations.isEmpty())
+        }
+    }
+    @Test fun largeShuffleIndexesWhileFramesContinueWithoutBlankOrLoadingText() {
+        Fixture(largeShuffle = true).use { f ->
+            assertTrue("Playback waited for entire index", f.catalog.scannedCount() < 30_000)
+            eventually(20_000) { f.frames.size >= 8 && f.catalog.scannedCount() == 30_000 }
+            f.checkScreenPixels()
+            assertTrue(f.violations.toString(), f.violations.isEmpty())
+            val gaps = f.frames.take(8).zipWithNext { a, b -> b.second - a.second }
+            assertTrue("Unexpected long gap while indexing: $gaps", gaps.all { it in 850..3000 })
+            println("LARGE_SHUFFLE frameGapsMs=$gaps frames=${f.frames.size} candidates=${f.catalog.scannedCount()}")
         }
     }
     @Test fun legacyAddressPrefetchOffDoesNotDisableImagePredecode() {

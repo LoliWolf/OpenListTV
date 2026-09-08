@@ -81,6 +81,8 @@ interface FileGateway {
 
 object Budgets {
     const val PAGE = 100
+    // Metadata indexing only; visible rows/thumbnails still use PAGE and a two-page window.
+    const val INDEX_PAGE = 500
     const val MAX_ENTRIES = 100_000
     const val MAX_DEPTH = 128
     const val INDEX_BYTES = 64L * 1024 * 1024

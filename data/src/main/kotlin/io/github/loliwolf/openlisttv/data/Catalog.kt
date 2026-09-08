@@ -5,6 +5,8 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.database.sqlite.SQLiteFullException
+import android.database.sqlite.SQLiteDiskIOException
 import io.github.loliwolf.openlisttv.core.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
@@ -12,43 +14,70 @@ import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import kotlin.random.Random
 
-class Catalog(context: Context, name: String = "catalog.db") : SQLiteOpenHelper(context.applicationContext, name, null, 2) {
+internal class IndexBudgetReached(message: String) : Exception(message)
+
+class Catalog(context: Context, name: String = "catalog.db", private val entryLimit: Int = Budgets.MAX_ENTRIES,
+    private val byteLimit: Long = Budgets.INDEX_BYTES) : SQLiteOpenHelper(context.applicationContext, name, null, 3) {
+    private val databaseFile = context.applicationContext.getDatabasePath(name)
+    private var entryCount: Int? = null
+    private var scanCount = 0
+    private var queueCount = 0
+    private var scanGeneration = 0L
+    private var scanSite = ""
+    private val counts = object : LinkedHashMap<List<String>, Int>(16, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<List<String>, Int>?) = size > 128
+    }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE directories(site TEXT,path TEXT,complete INTEGER,total INTEGER,updated INTEGER,PRIMARY KEY(site,path))")
         db.execSQL("CREATE TABLE entries(site TEXT,path TEXT,parent TEXT,name TEXT,directory INTEGER,kind TEXT,size INTEGER,modified TEXT,modified_at INTEGER,sign TEXT,ordinal INTEGER,sort_name TEXT,thumbnail TEXT NOT NULL DEFAULT '',PRIMARY KEY(site,path))")
         db.execSQL("CREATE INDEX dir_entries ON entries(site,parent,sort_name)")
         db.execSQL("CREATE TABLE scan_queue(path TEXT PRIMARY KEY,done INTEGER DEFAULT 0)")
-        db.execSQL("CREATE TABLE scan_items(path TEXT PRIMARY KEY,shuffle_key INTEGER,round INTEGER DEFAULT 0)")
+        db.execSQL("CREATE TABLE scan_items(path TEXT PRIMARY KEY,shuffle_key INTEGER,round INTEGER DEFAULT 0,size INTEGER DEFAULT -1,modified TEXT NOT NULL DEFAULT '')")
         db.execSQL("CREATE INDEX shuffle_items ON scan_items(round,shuffle_key)")
         db.execSQL("CREATE TABLE progress(site TEXT,path TEXT,modified TEXT,position INTEGER,updated INTEGER,PRIMARY KEY(site,path))")
     }
-    override fun onConfigure(db: SQLiteDatabase) { db.setMaximumSize(Budgets.INDEX_BYTES) }
+    override fun onConfigure(db: SQLiteDatabase) { db.setMaximumSize(byteLimit) }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) db.execSQL("ALTER TABLE entries ADD COLUMN thumbnail TEXT NOT NULL DEFAULT ''")
+        if (oldVersion < 3) {
+            db.execSQL("ALTER TABLE scan_items ADD COLUMN size INTEGER DEFAULT -1")
+            db.execSQL("ALTER TABLE scan_items ADD COLUMN modified TEXT NOT NULL DEFAULT ''")
+        }
     }
     @Synchronized fun complete(site: String, path: String): Boolean = readableDatabase.rawQuery("SELECT complete FROM directories WHERE site=? AND path=?", arrayOf(site, path)).use { it.moveToFirst() && it.getInt(0) == 1 }
     @Synchronized fun begin(site: String, path: String) {
+        entryCount = null; counts.clear()
         writableDatabase.delete("entries", "site=? AND parent=?", arrayOf(site, path))
         writableDatabase.insertWithOnConflict("directories", null, ContentValues().apply { put("site", site); put("path", path); put("complete", 0); put("total", 0); put("updated", System.currentTimeMillis()) }, SQLiteDatabase.CONFLICT_REPLACE)
     }
     @Synchronized fun insert(site: String, parent: String, entries: List<Entry>) {
         val db = writableDatabase
-        if (count("SELECT COUNT(*) FROM entries", emptyArray()) + entries.size > Budgets.MAX_ENTRIES) throw ClientFailure(FailureKind.CAPACITY, "本地索引达到 10 万条上限，请清缓存或缩小目录范围")
-        db.beginTransaction()
+        if (count("SELECT COUNT(*) FROM directories WHERE site=? AND path=?", arrayOf(site, parent)) == 0)
+            throw ClientFailure(FailureKind.SERVER, "目录索引已释放，请重新加载")
+        while ((entryCount ?: count("SELECT COUNT(*) FROM entries", emptyArray()).also { entryCount = it }) + entries.size > entryLimit) {
+            if (!evictColdDirectory(site, parent)) throw ClientFailure(FailureKind.CAPACITY, "当前目录超出本地索引预算；全树随机可分批读取元数据")
+        }
         try {
-            entries.forEach { e ->
-                db.insertOrThrow("entries", null, ContentValues().apply {
-                    put("site", site); put("path", e.path); put("parent", parent); put("name", e.name); put("directory", if (e.directory) 1 else 0)
-                    put("kind", e.kind.name); if (e.size >= 0 && !e.directory) put("size", e.size)
-                    put("modified", e.modified); runCatching { Instant.parse(e.modified).toEpochMilli() }.getOrNull()?.let { put("modified_at", it) }
-                    put("sign", e.sign); put("ordinal", e.ordinal); put("sort_name", NaturalOrder.key(e.name))
-                    put("thumbnail", e.thumbnail)
-                })
+            withIndexSpace(site, parent) {
+                transaction {
+                    db.compileStatement("INSERT INTO entries(site,path,parent,name,directory,kind,size,modified,modified_at,sign,ordinal,sort_name,thumbnail) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").use { statement ->
+                        entries.forEach { e ->
+                            statement.clearBindings()
+                            statement.bindString(1, site); statement.bindString(2, e.path); statement.bindString(3, parent); statement.bindString(4, e.name)
+                            statement.bindLong(5, if (e.directory) 1 else 0); statement.bindString(6, e.kind.name)
+                            if (e.size >= 0 && !e.directory) statement.bindLong(7, e.size)
+                            statement.bindString(8, e.modified)
+                            if (e.modified.isNotEmpty()) runCatching { Instant.parse(e.modified).toEpochMilli() }.getOrNull()?.let { statement.bindLong(9, it) }
+                            statement.bindString(10, e.sign); statement.bindLong(11, e.ordinal.toLong())
+                            statement.bindString(12, NaturalOrder.key(e.name)); statement.bindString(13, e.thumbnail)
+                            statement.executeInsert()
+                        }
+                    }
+                }
             }
-            db.setTransactionSuccessful()
-        } catch (e: android.database.sqlite.SQLiteFullException) { throw ClientFailure(FailureKind.CAPACITY, "索引达到 64 MiB 上限，请清缓存或缩小范围") }
+            entryCount = entryCount?.plus(entries.size); counts.clear()
+        } catch (e: IndexBudgetReached) { throw ClientFailure(FailureKind.CAPACITY, "当前目录的完整排序索引超出预算；可使用服务器顺序或全树随机", e) }
         catch (e: android.database.sqlite.SQLiteConstraintException) { throw ClientFailure(FailureKind.SERVER, "目录在读取时发生变化，请重新加载") }
-        finally { db.endTransaction() }
     }
     @Synchronized fun finish(site: String, path: String, total: Int) { writableDatabase.update("directories", ContentValues().apply { put("complete", 1); put("total", total); put("updated", System.currentTimeMillis()) }, "site=? AND path=?", arrayOf(site, path)) }
     @Synchronized fun page(site: String, path: String, offset: Int, limit: Int, sort: SortOrder, filter: EntryFilter? = null, query: BrowserQuery = BrowserQuery()): Listing {
@@ -66,7 +95,8 @@ class Catalog(context: Context, name: String = "catalog.db") : SQLiteOpenHelper(
             if (query.type !in listOf(BrowserType.ALL, BrowserType.FOLDER)) add(query.type.name)
             if (query.text.isNotEmpty()) add(query.text)
         }.toTypedArray()
-        val total = count("SELECT COUNT(*) FROM entries WHERE $where", args)
+        val countKey = listOf(where) + args
+        val total = counts.getOrPut(countKey) { count("SELECT COUNT(*) FROM entries WHERE $where", args) }
         val direction = if (sort.descending) "DESC" else "ASC"
         val primary = when (sort.field) { SortField.NAME -> "sort_name $direction"; SortField.MODIFIED -> "modified_at IS NULL, modified_at $direction"; SortField.SIZE -> "size IS NULL, size $direction"; SortField.SERVER -> "ordinal ASC" }
         val order = (if (sort.foldersFirst) "directory DESC," else "") + "$primary,sort_name ASC,path ASC"
@@ -74,24 +104,111 @@ class Catalog(context: Context, name: String = "catalog.db") : SQLiteOpenHelper(
         return Listing(entries, total)
     }
     @Synchronized fun clear(site: String? = null, clearHistory: Boolean = false) {
+        scanGeneration++; scanCount = 0; queueCount = 0; entryCount = null; counts.clear()
         val db = writableDatabase
         if (site == null) { db.delete("entries", null, null); db.delete("directories", null, null) }
         else { db.delete("entries", "site=?", arrayOf(site)); db.delete("directories", "site=?", arrayOf(site)); if (clearHistory) db.delete("progress", "site=?", arrayOf(site)) }
         db.delete("scan_items", null, null); db.delete("scan_queue", null, null)
         if (site == null) db.execSQL("VACUUM")
     }
-    @Synchronized fun startScan(root: String) { writableDatabase.delete("scan_items", null, null); writableDatabase.delete("scan_queue", null, null); enqueue(root) }
-    @Synchronized fun enqueue(path: String) { writableDatabase.insertWithOnConflict("scan_queue", null, ContentValues().apply { put("path", path); put("done", 0) }, SQLiteDatabase.CONFLICT_IGNORE) }
-    @Synchronized fun nextDirectory(): String? = readableDatabase.rawQuery("SELECT path FROM scan_queue WHERE done=0 LIMIT 1", null).use { if (it.moveToFirst()) it.getString(0) else null }
-    @Synchronized fun markDirectory(path: String) { writableDatabase.update("scan_queue", ContentValues().apply { put("done", 1) }, "path=?", arrayOf(path)) }
-    @Synchronized fun addScanned(e: Entry) { writableDatabase.insertWithOnConflict("scan_items", null, ContentValues().apply { put("path", e.path); put("shuffle_key", Random.nextLong()); put("round", 0) }, SQLiteDatabase.CONFLICT_IGNORE) }
-    @Synchronized fun scannedCount() = count("SELECT COUNT(*) FROM scan_items", emptyArray())
-    @Synchronized fun shuffled(site: String, round: Int, scanning: Boolean): Entry? {
-        val where = if (scanning) "" else " WHERE s.round<>$round"
-        val order = if (scanning) "random()" else "s.shuffle_key"
-        val e = readableDatabase.rawQuery("SELECT e.* FROM scan_items s JOIN entries e ON e.path=s.path AND e.site=?$where ORDER BY $order LIMIT 1", arrayOf(site)).use { if (it.moveToFirst()) it.entry() else null }
-        if (e != null && !scanning) writableDatabase.update("scan_items", ContentValues().apply { put("round", round); put("shuffle_key", Random.nextLong()) }, "path=?", arrayOf(e.path))
-        return e
+    @Synchronized fun reserveScan(): Long = ++scanGeneration
+    @Synchronized fun startScan(root: String, site: String = "", generation: Long = reserveScan()): Long {
+        requireScan(generation)
+        scanSite = site; scanCount = 0; queueCount = 0
+        withIndexSpace(site, root) { transaction {
+            writableDatabase.delete("scan_items", null, null); writableDatabase.delete("scan_queue", null, null)
+            writableDatabase.execSQL("INSERT INTO scan_queue(path,done) VALUES(?,0)", arrayOf(root))
+        } }
+        queueCount = 1
+        return scanGeneration
+    }
+    @Synchronized fun cancelScan(generation: Long) { if (scanGeneration == generation) scanGeneration++ }
+    private fun requireScan(generation: Long) { if (scanGeneration != generation) throw CancellationException("Superseded scan") }
+    @Synchronized fun nextDirectory(generation: Long): String? {
+        requireScan(generation)
+        return readableDatabase.rawQuery("SELECT path FROM scan_queue WHERE done=0 LIMIT 1", null).use { if (it.moveToFirst()) it.getString(0) else null }
+    }
+    @Synchronized fun markDirectory(generation: Long, path: String) {
+        requireScan(generation)
+        // Paths strictly descend; completed queue nodes need not accumulate or be rescanned.
+        writableDatabase.delete("scan_queue", "path=?", arrayOf(path))
+    }
+    /** One short transaction per network page; no entry-table join, tokens, signs or thumbnails. */
+    @Synchronized fun appendScan(generation: Long, site: String, root: String, entries: List<Entry>, options: SlideshowOptions): Boolean {
+        requireScan(generation)
+        val media = entries.filter(options::accepts)
+        val directories = entries.filter { it.directory && options.recursive }
+        if (directories.any { Paths.depth(root, it.path) >= Budgets.MAX_DEPTH }) throw IndexBudgetReached("达到 128 层目录深度预算")
+        val accepted = media.take((entryLimit - scanCount).coerceAtLeast(0))
+        val queued = directories.take((entryLimit - queueCount).coerceAtLeast(0))
+        // Leave space for round/index updates after admission stops. This is disk space,
+        // not an expansion of the bitmap/heap budget. Long paths count more than short ones.
+        val needed = minOf(2L * 1024 * 1024, byteLimit / 4) +
+            (accepted + queued).sumOf { (it.path.length.toLong() * 4 + it.modified.length * 4 + 128) * 2 }
+        while (indexFreeBytes() < needed) {
+            if (databaseFile.parentFile!!.usableSpace < Budgets.DISK_RESERVE_BYTES) throw ClientFailure(FailureKind.CAPACITY, "本机存储空间不足，请释放空间后继续")
+            if (!evictColdDirectory(site, root)) throw IndexBudgetReached("达到本地索引磁盘预算")
+        }
+        withIndexSpace(site, root) { transaction {
+            writableDatabase.compileStatement("INSERT INTO scan_items(path,shuffle_key,round,size,modified) VALUES(?,?,0,?,?)").use { statement ->
+                accepted.forEach { e ->
+                    statement.clearBindings(); statement.bindString(1, e.path); statement.bindLong(2, Random.nextLong())
+                    statement.bindLong(3, e.size); statement.bindString(4, e.modified); statement.executeInsert()
+                }
+            }
+            writableDatabase.compileStatement("INSERT INTO scan_queue(path,done) VALUES(?,0)").use { statement ->
+                queued.forEach { statement.bindString(1, it.path); statement.executeInsert() }
+            }
+        } }
+        scanCount += accepted.size; queueCount += queued.size
+        return accepted.size < media.size || queued.size < directories.size
+    }
+    @Synchronized fun addScanned(e: Entry) { appendScan(scanGeneration, "", "/", listOf(e), SlideshowOptions()) }
+    @Synchronized fun scannedCount(generation: Long? = null): Int { generation?.let(::requireScan); return scanCount }
+    @Synchronized fun shuffled(site: String, round: Int, scanning: Boolean, generation: Long? = null): Entry? {
+        generation?.let(::requireScan)
+        if (scanSite.isNotEmpty() && scanSite != site) return null
+        // ROWIDs are dense: only plain INSERTs and full-session DELETEs, no AUTOINCREMENT,
+        // per-item deletion or INSERT OR IGNORE. Uniform draw without ORDER BY random().
+        val sql = if (scanning) "SELECT path,size,modified FROM scan_items WHERE rowid=?" else
+            "SELECT path,size,modified FROM scan_items WHERE round=? ORDER BY shuffle_key LIMIT 1"
+        if (scanCount == 0) return null
+        val key = if (scanning) Random.nextInt(scanCount) + 1 else round - 1
+        val entry = readableDatabase.rawQuery(sql, arrayOf(key.toString())).use {
+            if (it.moveToFirst()) Entry(it.getString(0), it.getString(0).substringAfterLast('/'), false, it.getLong(1), it.getString(2)) else null
+        }
+        if (entry != null && !scanning) writableDatabase.execSQL("UPDATE scan_items SET round=?,shuffle_key=? WHERE path=?", arrayOf(round, Random.nextLong(), entry.path))
+        return entry
+    }
+    private fun transaction(block: () -> Unit) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try { block(); db.setTransactionSuccessful() } finally { db.endTransaction() }
+    }
+    private fun indexFreeBytes(): Long {
+        fun pragma(name: String) = readableDatabase.rawQuery("PRAGMA $name", null).use { it.moveToFirst(); it.getLong(0) }
+        return (pragma("max_page_count") - pragma("page_count") + pragma("freelist_count")) * pragma("page_size")
+    }
+    private fun evictColdDirectory(site: String, protectedPath: String): Boolean {
+        val oldest = readableDatabase.rawQuery("SELECT site,path FROM directories WHERE NOT(site=? AND path=?) ORDER BY updated LIMIT 1", arrayOf(site, protectedPath))
+            .use { if (it.moveToFirst()) arrayOf(it.getString(0), it.getString(1)) else null } ?: return false
+        transaction {
+            writableDatabase.delete("entries", "site=? AND parent=?", oldest)
+            writableDatabase.delete("directories", "site=? AND path=?", oldest)
+        }
+        entryCount = null; counts.clear()
+        return true
+    }
+    private fun withIndexSpace(site: String, protectedPath: String, block: () -> Unit) {
+        while (true) {
+            try { block(); return }
+            catch (e: SQLiteFullException) {
+                entryCount = null; counts.clear()
+                if (databaseFile.parentFile!!.usableSpace < Budgets.DISK_RESERVE_BYTES) throw ClientFailure(FailureKind.CAPACITY, "本机存储空间不足，请释放空间后继续", e)
+                if (!evictColdDirectory(site, protectedPath)) throw IndexBudgetReached("达到本地索引磁盘预算")
+            }
+            catch (e: SQLiteDiskIOException) { throw ClientFailure(FailureKind.CAPACITY, "无法读写本机索引，请检查存储状态", e) }
+        }
     }
     @Synchronized fun position(site: String, e: Entry): Long = readableDatabase.rawQuery("SELECT position,modified FROM progress WHERE site=? AND path=?", arrayOf(site, e.path)).use { if (it.moveToFirst() && it.getString(1) == e.modified) it.getLong(0) else 0L }
     @Synchronized fun subtitles(site: String, parent: String): List<Entry> = readableDatabase.rawQuery("SELECT * FROM entries WHERE site=? AND parent=? AND (lower(name) LIKE '%.srt' OR lower(name) LIKE '%.vtt') ORDER BY sort_name LIMIT 32", arrayOf(site, parent)).use { c -> buildList { while (c.moveToNext()) add(c.entry()) } }
@@ -114,28 +231,58 @@ class FileRepository(val session: Session, private val gateway: FileGateway, val
         mutex.withLock {
             if (!force && catalog.complete(session.site.id, path)) return@withLock
             catalog.begin(session.site.id, path)
-            var page = 1; var read = 0; var total: Int? = null
-            while (true) {
-                currentCoroutineContext().ensureActive()
-                val listing = gateway.list(session, path, password(path), page, Budgets.PAGE)
-                if (total != null && total != listing.total) throw ClientFailure(FailureKind.SERVER, "目录内容已变化，请重新加载")
-                total = listing.total
+            var read = 0
+            scanPages(path) { listing ->
+                if (listing.total > Budgets.MAX_ENTRIES) throw ClientFailure(FailureKind.CAPACITY, "当前目录超过 10 万条完整排序预算；可使用服务器顺序或全树随机")
                 catalog.insert(session.site.id, path, listing.entries)
                 read += listing.entries.size
-                progress(read, total)
-                if (read >= total) {
-                    if (read != total) throw ClientFailure(FailureKind.SERVER, "目录总数与返回内容不一致")
-                    catalog.finish(session.site.id, path, total); break
-                }
-                if (listing.entries.isEmpty() || page >= Budgets.MAX_ENTRIES / Budgets.PAGE) throw ClientFailure(FailureKind.SERVER, "分页响应异常，请重新加载")
-                page++
+                progress(read, listing.total)
+                if (read == listing.total) catalog.finish(session.site.id, path, listing.total)
             }
+        }
+    }
+    /** Stream only one metadata page. No browser-index writes and no tree-sized collection. */
+    internal suspend fun scanPages(path: String, consume: suspend (Listing) -> Unit) {
+        var page = 1; var read = 0; var total: Int? = null; var pageSize = Budgets.INDEX_PAGE
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val listing = try { gateway.list(session, path, password(path), page, pageSize) }
+            catch (e: ClientFailure) {
+                if (e.kind != FailureKind.RESOURCE_LIMIT || pageSize <= Budgets.PAGE) throw e
+                pageSize = Budgets.PAGE; page = read / pageSize + 1; continue
+            }
+            // Some compatible servers clamp per_page. Retry page 1 before consuming anything.
+            if (pageSize > Budgets.PAGE && listing.entries.size < pageSize && read + listing.entries.size < listing.total) {
+                pageSize = Budgets.PAGE; page = read / pageSize + 1; continue
+            }
+            if (listing.total < 0 || listing.entries.size > pageSize || total != null && total != listing.total ||
+                read.toLong() + listing.entries.size > listing.total || listing.entries.size < pageSize && read + listing.entries.size < listing.total)
+                throw ClientFailure(FailureKind.SERVER, "目录内容变化或分页响应不完整，请重新加载")
+            total = listing.total
+            consume(listing)
+            read += listing.entries.size
+            if (read == total) return
+            page++
+            // Give foreground image decoding/network work an opportunity between batches.
+            yield()
         }
     }
     suspend fun page(path: String, offset: Int, sort: SortOrder, limit: Int = Budgets.PAGE, filter: EntryFilter? = null, query: BrowserQuery = BrowserQuery()): Listing = withContext(Dispatchers.IO) { catalog.page(session.site.id, path, offset, limit, sort, filter, query) }
     suspend fun remotePage(path: String, offset: Int): Listing = gateway.list(session, path, password(path), offset / Budgets.PAGE + 1, Budgets.PAGE)
     fun reader(sort: SortOrder): DirectoryReader = object : DirectoryReader {
-        override suspend fun page(path: String, offset: Int, filter: EntryFilter): Listing { ensure(path); return this@FileRepository.page(path, offset, sort, 1, filter) }
+        private val windows = object : LinkedHashMap<Pair<String, EntryFilter>, Pair<Int, Listing>>(4, .75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String, EntryFilter>, Pair<Int, Listing>>?) = size > 2
+        }
+        override suspend fun page(path: String, offset: Int, filter: EntryFilter): Listing {
+            val key = path to filter
+            val start = offset / Budgets.PAGE * Budgets.PAGE
+            val cached = windows[key]?.takeIf { it.first == start }
+            val listing = cached?.second ?: run {
+                ensure(path)
+                this@FileRepository.page(path, start, sort, Budgets.PAGE, filter).also { windows[key] = start to it }
+            }
+            return Listing(listing.entries.getOrNull(offset - start)?.let(::listOf).orEmpty(), listing.total)
+        }
     }
     suspend fun resolve(e: Entry) = gateway.resolve(session, e, password(Paths.parent(e.path)))
     suspend fun subtitles(entry: Entry): List<Entry> { ensure(Paths.parent(entry.path)); return withContext(Dispatchers.IO) { catalog.subtitles(session.site.id, Paths.parent(entry.path)) } }
@@ -143,56 +290,77 @@ class FileRepository(val session: Session, private val gateway: FileGateway, val
 
 class ShuffleTraversal(private val root: String, private val repository: FileRepository, private val options: SlideshowOptions, parent: CoroutineScope) : TraversalSource {
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + Dispatchers.IO)
+    private val nextLock = Mutex()
+    private var reservedPick: Entry? = null
     private var started = false
     @Volatile private var scanning = true
     @Volatile private var failure: ClientFailure? = null
     @Volatile private var discovered = 0
+    @Volatile private var limited: String? = null
+    @Volatile private var generation: Long? = null
+    @Volatile private var closed = false
     private var round = 1
-    override val description get() = "全树随机 · 已发现 $discovered 项" + if (scanning) "（扫描中，可能重复）" else "（扫描完成）"
-    override suspend fun next(): Entry? {
+    override val warning get() = limited?.let { "$it；继续轮播已发现的 $discovered 项，未覆盖全部范围" }
+    override val description get() = "全树随机 · 已发现 $discovered 项" + when {
+        limited != null -> "（${limited}；继续已发现资源，未覆盖全部范围）"
+        scanning -> "（扫描中，可能重复）"
+        else -> "（扫描完成）"
+    }
+    override suspend fun next(): Entry? = nextLock.withLock { takeNext() }
+    private suspend fun takeNext(): Entry? {
+        currentCoroutineContext().ensureActive()
+        if (closed) throw CancellationException("Closed traversal")
+        reservedPick?.let { reservedPick = null; return it }
         if (!started) {
+            // Store ownership inside IO, so prompt cancellation cannot lose the lease.
+            val reserved = generation ?: repository.catalog.reserveScan().also { generation = it }
+            try { withContext(Dispatchers.IO) { repository.catalog.startScan(root, repository.session.site.id, reserved) } }
+            catch (e: IndexBudgetReached) { throw ClientFailure(FailureKind.CAPACITY, "索引预算不足，尚未发现可播放资源；请选择更具体的目录或清理索引", e) }
+            if (closed) { generation?.let(repository.catalog::cancelScan); throw CancellationException("Closed traversal") }
+            val lease = checkNotNull(generation)
             started = true
-            withContext(Dispatchers.IO) { repository.catalog.startScan(root) }
             scope.launch {
                 try {
                     while (true) {
                         ensureActive()
-                        val path = repository.catalog.nextDirectory() ?: break
+                        val path = repository.catalog.nextDirectory(lease) ?: break
                         try {
-                            repository.ensure(path)
-                            var offset = 0
-                            while (true) {
+                            repository.scanPages(path) { page ->
                                 ensureActive()
-                                val page = repository.page(path, offset, SortOrder(SortField.SERVER, foldersFirst = false))
-                                for (entry in page.entries) {
-                                    if (entry.directory && options.recursive) {
-                                        if (Paths.depth(root, entry.path) >= Budgets.MAX_DEPTH) throw ClientFailure(FailureKind.CAPACITY, "扫描达到目录深度上限，请缩小范围")
-                                        repository.catalog.enqueue(entry.path)
-                                    } else if (options.accepts(entry)) repository.catalog.addScanned(entry)
-                                }
-                                offset += page.entries.size
-                                discovered = repository.catalog.scannedCount()
-                                if (offset >= page.total || page.entries.isEmpty()) break
+                                val reached = repository.catalog.appendScan(lease, repository.session.site.id, root, page.entries, options)
+                                discovered = repository.catalog.scannedCount(lease)
+                                if (reached) throw IndexBudgetReached("达到 10 万条索引预算")
+                                delay(10)
                             }
                         } catch (e: ClientFailure) { if (e.kind != FailureKind.ACCESS) throw e }
-                        repository.catalog.markDirectory(path)
-                        delay(30)
+                        repository.catalog.markDirectory(lease, path)
                     }
                 } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { failure = e as? ClientFailure ?: ClientFailure(FailureKind.CAPACITY, "扫描无法继续，请清理索引或缩小范围") }
+                catch (e: IndexBudgetReached) { limited = e.message }
+                catch (e: Exception) { failure = e as? ClientFailure ?: when (e) {
+                    is SQLiteFullException, is SQLiteDiskIOException -> ClientFailure(FailureKind.CAPACITY, "本机索引读写失败，请检查存储空间", e)
+                    else -> ClientFailure(FailureKind.SERVER, "目录扫描失败，请重新加载后重试", e)
+                } }
                 finally { scanning = false }
             }
         }
         while (true) {
             currentCoroutineContext().ensureActive()
             failure?.let { throw it }
-            val e = withContext(Dispatchers.IO) { repository.catalog.shuffled(repository.session.site.id, round, scanning) }
-            if (e != null) return e
+            val sampling = scanning
+            // Keep a selected/round-marked item across prompt cancellation at the IO boundary.
+            withContext(Dispatchers.IO) { reservedPick = repository.catalog.shuffled(repository.session.site.id, round, sampling, checkNotNull(generation)) }
+            if (closed) throw CancellationException("Closed traversal")
+            reservedPick?.let { reservedPick = null; return it }
+            if (sampling) { delay(50); continue }
             if (!scanning) {
-                if (repository.catalog.scannedCount() == 0) return null
+                if (repository.catalog.scannedCount(checkNotNull(generation)) == 0) {
+                    limited?.let { throw ClientFailure(FailureKind.CAPACITY, "$it，尚未发现可播放资源；请选择更具体的目录") }
+                    return null
+                }
                 round++
             } else delay(100)
         }
     }
-    override fun close() { scope.cancel() }
+    override fun close() { closed = true; scope.cancel(); generation?.let(repository.catalog::cancelScan) }
 }

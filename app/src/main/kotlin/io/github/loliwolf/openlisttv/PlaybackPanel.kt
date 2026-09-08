@@ -51,6 +51,7 @@ class PlaybackPanel(
     private var engine: MediaEngine? = null
     private var bitmap: Bitmap? = null
     private var source: TraversalSource? = null
+    private var traversalWarning: String? = null
     private val history = PlaybackHistory()
     private var loadJob: Job? = null
     private var ticker: Job? = null
@@ -319,6 +320,11 @@ class PlaybackPanel(
         if (current?.kind == MediaKind.AUDIO) center.text = "♪\n${current?.name}"
         if (first) {
             status.text = (source?.description ?: "单项点播") + if (skipped > 0) " · 已跳过 $skipped 项" else ""
+            source?.warning?.takeIf { it != traversalWarning }?.let {
+                traversalWarning = it
+                Toast.makeText(activity, it, Toast.LENGTH_LONG).show()
+                showControls()
+            }
             prepareNext()
             // Automatic media changes must not steal focus or keep reopening the overlay.
             if (controls.visibility == VISIBLE && hideJob?.isActive != true) hideJob = scope.launch { delay(5000); if (!paused && ready) hideControls() }

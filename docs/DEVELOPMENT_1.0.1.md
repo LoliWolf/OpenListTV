@@ -1,11 +1,12 @@
 # 1.0.1 迭代上下文
 
-分支：`dev/1.0.1`。预发布包 `1.0.1-preview.7` / versionCode 11，功能与 preview.6 一致，递增版本以支持更新验证。包含可选浏览器下载更新，以及 preview.5 的画面比例、图片缩放旋转和遥控器长按加速进度。旧 APK 保留。
+分支：`dev/1.0.1`。本地包 `1.0.1-preview.8` / versionCode 12，优化大目录索引与全树轮播。公开预发布仍为 preview.7，稳定版仍为1.0.0，旧 APK 保留。
 
-**本轮用户明确授权推送开发分支并发布 preview.7 预发布版，非 Latest。** 不替换稳定版 1.0.0 或任何已交付 APK，后续发布仍须另行确认。
+**此前发布授权只覆盖 preview.7；本轮 preview.8 不推送或发布。** 不替换稳定版 1.0.0 或任何已交付 APK，后续发布仍须另行确认。
 
 ## 本次改动
 
+- preview.8：500条串行元数据分页/兼容回退、批量prepared INSERT、有界计数/遍历窗口缓存和旧浏览目录淘汰；全树扫描直接写精简候选，无需整目录 entries 副本。扫描中稠密ROWID随机选择，完成后使用(round,shuffle_key)索引。软件索引预算触顶后明确提示范围受限并继续已发现项；物理存储和网络等故障仍暂停。Catalog增量升级v3，只追加候选size/modified；下载库不变。详见AGENTS.md与LargeLibraryTest。
 - preview.6：设置新增“使用浏览器下载”，默认关闭，持久化到既有 github-updates 偏好的 browser.download。开启后校验官方新版本 APK 链接并交给外部浏览器，不调用应用内下载/校验/安装流程，清除旧安装授权接续。HTTPS 加速前缀保留；HTTP/SOCKS5 代理不可能传给外部浏览器，设置明确说明。无浏览器提供复制链接，不自动回退。无新依赖或权限。
 - GitHub 更新（preview.3）：登录、连接失败和设置页有手动入口；每次进入应用可自动检测并提示，可选择已发布的测试版本。独立配置网络代理或 HTTPS 加速前缀；点击更新后下载、校验并请求系统安装，不静默安装。不带 OpenList 凭证，不接受草稿/非官方附件，完整限制见 AGENTS.md。
 - HDR 视频：删除按 HDR 标记一律拒绝的逻辑，保留色彩元数据，使用 Media3/MediaCodec/SurfaceView 原生链路。显示设备无相应 HDR 能力且有可用 SDR 轨道时优先 SDR；实际解码失败仍按原策略处理。
@@ -16,7 +17,7 @@
 
 ## 继续工作时
 
-preview.2 在上述功能上追加当前目录搜索/类型筛选、会话定时停止、播放信息快照、单任务前台下载及本机离线点播/导出。操作说明见 [预览版说明](PREVIEW_1.0.1.md)。Catalog 仍为 v2；新增独立 downloads.db v2，增量增加 source_key，下载副本不是缓存。
+preview.2 在上述功能上追加当前目录搜索/类型筛选、会话定时停止、播放信息快照、单任务前台下载及本机离线点播/导出。操作说明见 [预览版说明](PREVIEW_1.0.1.md)。Catalog 已在preview.8增量升级v3；独立 downloads.db 仍为v2，增量增加 source_key，下载副本不是缓存。
 
 传输任务由 Application 持有唯一 slot，Activity.onStop 取消；播放前等待旧写入者完全退出。强 ETag、最终 URL 哈希和范围响应一致才续传；其他情况完整重下。完成必须流结束/长度校验及原子 rename，进程中断后不能把 .part 当成完成。取消后的 NonCancellable 范围必须覆盖 IO 返回和释放 slot。
 
