@@ -49,7 +49,10 @@ await key(4); await waitFor('9 项'); await focused('打开 Lots'); await key(20
 await focused('打开 Nested'); await key(20); await focused('打开 1.png'); await key(23); await waitFor('图片 ·'); passed('Image loaded through resolved media URL');
 await key(19); await pressUntilLabel('退出', 22, 10); await key(23); await waitFor('demo · /Photos'); await focused('打开 1.png'); passed('Player exit restores selected file');
 await key(4); await waitFor('9 项');
-await pressUntilLabel('打开 Tone.wav'); await key(23); await waitFor('0:12'); passed('WAV streaming playback and duration');
+await pressUntilLabel('打开 Tone.wav'); await key(23);
+// Repeated runs retain playback progress; handle the normal resume prompt, never pm clear.
+if ((await nodes()).some(n => n.text === '从头播放')) { await pressUntilLabel('从头播放', 21, 10); await key(23); }
+await waitFor('0:12'); passed('WAV streaming playback and duration');
 await key(3); await sleep(600); await run('shell', 'am', 'start', '-W', '-n', `${app}/io.github.loliwolf.openlisttv.MainActivity`); await waitFor('已暂停'); passed('Home releases playback and requires explicit resume');
 const metrics = await (await fetch('http://127.0.0.1:18765/metrics')).json();
 if (metrics.data.credentialLeaks !== 0) throw new Error('API credentials leaked into media traffic');
