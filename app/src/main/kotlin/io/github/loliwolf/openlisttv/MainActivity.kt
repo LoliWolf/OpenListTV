@@ -534,7 +534,7 @@ class MainActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean = handleRemoteKey(event) || super.onKeyDown(keyCode, event)
     override fun onStart() { super.onStart(); updates.onStart(); panel?.foreground(); if (browserVisible && panel == null) browserList?.resumeLoading() }
     override fun onResume() { super.onResume(); updates.onResume() }
-    override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus && ::root.isInitialized) updates.foreground() }
+    override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); panel?.windowFocusChanged(hasFocus); if (hasFocus && ::root.isInitialized) updates.foreground() }
     override fun onStop() { work?.cancel(); updates.background(); downloads.pause("离开前台，传输已暂停；可手动继续"); browserList?.pauseLoading(); panel?.background(); super.onStop() }
     override fun onTrimMemory(level: Int) { super.onTrimMemory(level); if (level != TRIM_MEMORY_UI_HIDDEN) panel?.trimMemory() }
     override fun onDestroy() { work?.cancel(); downloadList?.dispose(); browserList?.dispose(); panel?.dispose(); super.onDestroy() }

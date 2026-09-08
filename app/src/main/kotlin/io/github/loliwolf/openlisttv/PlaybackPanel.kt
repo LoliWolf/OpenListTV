@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Matrix
 import android.os.SystemClock
 import android.view.*
 import android.widget.*
@@ -11,6 +12,7 @@ import androidx.media3.common.C
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.lifecycle.lifecycleScope
 import io.github.loliwolf.openlisttv.TvUi.dp
 import io.github.loliwolf.openlisttv.core.*
@@ -38,7 +40,7 @@ class PlaybackPanel(
     private val http = HttpClients.media(repository.session.site.allowHttp)
     private val images = ImagePipeline(activity, http).apply { hdrEnabled = HdrSupport.canRenderHdrImages(activity) }
     private val hdrWindow = HdrImageWindow(activity)
-    private val imageView = ImageView(activity).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+    private val imageView = ImageView(activity).apply { scaleType = ImageView.ScaleType.MATRIX }
     private val playerView = PlayerView(activity).apply { useController = false; setKeepContentOnPlayerReset(false) }
     private val center = TvUi.text(activity, "正在加载…", 22f, Color.WHITE).apply { gravity = Gravity.CENTER; setPadding(dp(40), dp(20), dp(40), dp(20)) }
     private val controls = TvUi.column(activity).apply { setBackgroundColor(Color.argb(235, 14, 26, 41)); setPadding(dp(28), dp(16), dp(28), dp(16)) }
@@ -75,6 +77,31 @@ class PlaybackPanel(
     private val stopDeadline = SlideshowDeadline()
     private var stopJob: Job? = null
     private var activeDialog: AlertDialog? = null
+    private val picture = PictureTransform()
+    private var picturePath: String? = null
+    private var imagePan = false
+    private var lastPanTime = 0L
+    private val displayPrefs = activity.getSharedPreferences("playback.display", Context.MODE_PRIVATE)
+    private var videoFraming = runCatching { VideoFraming.valueOf(displayPrefs.getString("video.framing", "FIT")!!) }.getOrDefault(VideoFraming.FIT)
+    private val pictureHelp = TvUi.text(activity, "", 16f, Color.WHITE).apply { gravity = Gravity.CENTER; setBackgroundColor(0xD9142233.toInt()); setPadding(dp(16),dp(12),dp(16),dp(12)); visibility = GONE }
+    private val seekLabel = TvUi.text(activity, "", 19f, Color.WHITE)
+    private val seekBar = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 1000 }
+    private val seekHud = TvUi.column(activity).apply { setBackgroundColor(0xEF142233.toInt()); setPadding(dp(24),dp(16),dp(24),dp(16)); addView(seekLabel); addView(seekBar); visibility = GONE }
+    private val seek = RemoteSeekController(scope, {
+        engine?.player?.let { p -> object : RemoteSeekController.Port {
+            override val position get() = p.currentPosition
+            override val duration get() = p.duration
+            override val seekable get() = p.isCurrentMediaItemSeekable
+            override var playWhenReady: Boolean get() = p.playWhenReady; set(value) { p.playWhenReady = value }
+            override fun seekTo(position: Long) { p.seekTo(position) }
+        } }
+    }) { model ->
+        if (model == null) seekHud.visibility = GONE else {
+            seekHud.visibility = VISIBLE
+            seekLabel.text = "${if (model.direction > 0) "快进" else "快退"}  ${time(model.target)} / ${time(model.duration)}\n长按逐渐加速 · 松开定位 · 返回取消"
+            seekBar.progress = (model.target.toDouble() / model.duration * 1000).toInt()
+        }
+    }
 
     init {
         isFocusable = true
@@ -88,6 +115,7 @@ class PlaybackPanel(
         row.addView(TvUi.button(activity, "下一项", dark = true) { advance(1) })
         row.addView(TvUi.button(activity, "音轨 / 字幕", dark = true) { tracks() })
         row.addView(TvUi.button(activity, "播放信息", dark = true) { information() })
+        row.addView(TvUi.button(activity, "画面设置", dark = true) { pictureSettings() })
         if (options != null) row.addView(TvUi.button(activity, "定时停止", dark = true) { stopDialog() })
         row.addView(TvUi.button(activity, "重试", dark = true) {
             if (stopIfExpired()) return@button
@@ -97,7 +125,66 @@ class PlaybackPanel(
         })
         row.addView(TvUi.button(activity, "退出", dark = true) { onExit() }); controls.addView(row)
         addView(controls, LayoutParams(-1, -2, Gravity.BOTTOM))
+        addView(pictureHelp, LayoutParams(-1, -2, Gravity.BOTTOM))
+        addView(seekHud, LayoutParams(-1, -2, Gravity.BOTTOM))
+        imageView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> applyPicture() }
         showControls()
+    }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w,h,oldw,oldh)
+        if (w > 0 && h > 0) { applyVideoFraming(); applyPicture() }
+    }
+    private fun applyVideoFraming() {
+        if (width <= 0 || height <= 0) return
+        val (w,h) = videoFraming.viewport(width,height)
+        playerView.resizeMode = when(videoFraming) { VideoFraming.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT; VideoFraming.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM; else -> AspectRatioFrameLayout.RESIZE_MODE_FILL }
+        val old = playerView.layoutParams as LayoutParams
+        if (old.width != w || old.height != h || old.gravity != Gravity.CENTER) playerView.layoutParams = LayoutParams(w,h,Gravity.CENTER)
+    }
+    private fun applyPicture() {
+        val drawable = imageView.drawable ?: return
+        if (imageView.width <= 0 || imageView.height <= 0 || drawable.intrinsicWidth <= 0 || drawable.intrinsicHeight <= 0) return
+        val layout = picture.layout(drawable.intrinsicWidth,drawable.intrinsicHeight,imageView.width,imageView.height)
+        imageView.imageMatrix = Matrix().apply {
+            postTranslate(-drawable.intrinsicWidth / 2f,-drawable.intrinsicHeight / 2f)
+            postRotate(layout.rotation.toFloat()); postScale(layout.scale.toFloat(),layout.scale.toFloat())
+            postTranslate(layout.x.toFloat(),layout.y.toFloat())
+        }
+        pictureHelp.text = "图片 ${"%.2f".format(picture.zoom)}× · 旋转 ${picture.quarterTurns * 90}°\n方向键移动 · 确认调整 · 返回结束查看"
+    }
+    private fun pictureSettings() {
+        seek.cancel()
+        if (current?.kind == MediaKind.IMAGE && bitmap != null) { imageSettings(); return }
+        if (current?.kind != MediaKind.VIDEO) { Toast.makeText(activity,"当前资源没有可调整的画面",Toast.LENGTH_SHORT).show(); return }
+        val choices = VideoFraming.entries
+        presentDialog(AlertDialog.Builder(activity).setTitle("视频画面比例")
+            .setSingleChoiceItems(choices.map { it.label }.toTypedArray(),choices.indexOf(videoFraming)) { _, index ->
+                videoFraming = choices[index]; displayPrefs.edit().putString("video.framing",videoFraming.name).apply(); applyVideoFraming()
+            }.setPositiveButton("完成",null).create())
+    }
+    private fun imageSettings() {
+        if (bitmap == null || disposed || suspended) return
+        // Inspecting a photograph pauses its slideshow, never its stop deadline.
+        loadJob?.cancel(); autoSkip?.cancel(); nextPrepared.cancel(); ticker?.cancel()
+        paused = true; ready = true; pause.text = "继续"; activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        imagePan = false; pictureHelp.visibility = GONE
+        val form = TvUi.column(activity).apply { setPadding(dp(20),dp(8),dp(20),dp(8)) }
+        val value = TvUi.text(activity,"",16f)
+        fun refresh() { applyPicture(); value.text = "缩放 ${"%.2f".format(picture.zoom)}× / 旋转 ${picture.quarterTurns * 90}°" }
+        form.addView(value)
+        val actions = ActionFlow(activity)
+        actions.addView(TvUi.button(activity,"放大 ＋") { picture.scaleBy(1.25); refresh() })
+        actions.addView(TvUi.button(activity,"缩小 －") { picture.scaleBy(0.8); refresh() })
+        actions.addView(TvUi.button(activity,"向左旋转") { picture.rotate(-1); refresh() })
+        actions.addView(TvUi.button(activity,"向右旋转") { picture.rotate(1); refresh() })
+        actions.addView(TvUi.button(activity,"恢复原图") { picture.reset(); refresh() })
+        form.addView(actions)
+        form.addView(TvUi.text(activity,"缩放范围 1–4×，每次旋转 90°。仅变换当前已解码图片，不重新下载，也不修改原文件。调整时暂停轮播，完成后可按继续。",14f))
+        val dialog = AlertDialog.Builder(activity).setTitle("图片缩放 / 旋转").setView(ScrollView(activity).apply { addView(form) })
+            .setPositiveButton("移动画面") { _, _ ->
+                imagePan = true; controls.visibility = GONE; pictureHelp.visibility = VISIBLE; requestFocus(); applyPicture()
+            }.setNegativeButton("完成",null).create()
+        presentDialog(dialog); refresh()
     }
     private fun createSource(): TraversalSource? {
         val o = options ?: return null
@@ -148,6 +235,7 @@ class PlaybackPanel(
                 add("显示位图：${b.width} × ${b.height}（按预算采样）")
                 add("位图内存：${DisplayText.bytes(HdrSupport.bitmapBytes(b))}")
                 add("当前位图：${if (android.os.Build.VERSION.SDK_INT >= 34 && b.hasGainmap()) "Ultra HDR / gainmap" else "SDR"}")
+                add("手动画面：${"%.2f".format(picture.zoom)}× / ${picture.quarterTurns * 90}°")
             }
             if (entry?.kind in listOf(MediaKind.VIDEO, MediaKind.AUDIO)) engine?.information()?.takeIf { it.isNotEmpty() }?.let(::add)
             val types = HdrSupport.displayTypes(activity)
@@ -159,8 +247,9 @@ class PlaybackPanel(
         presentDialog(AlertDialog.Builder(activity).setTitle("播放信息").setView(ScrollView(activity).apply { addView(text) }).setPositiveButton("关闭", null).create())
     }
     private fun presentDialog(dialog: AlertDialog) {
+        seek.cancel()
         activeDialog?.dismiss(); activeDialog = dialog; hideJob?.cancel()
-        dialog.setOnDismissListener { if (activeDialog === dialog) activeDialog = null; if (!disposed && !suspended) showControls() }
+        dialog.setOnDismissListener { if (activeDialog === dialog) activeDialog = null; if (!disposed && !suspended && !imagePan) showControls() }
         dialog.show()
     }
     private fun launchPlay(entry: Entry, resolved: MediaSource? = null) {
@@ -194,7 +283,9 @@ class PlaybackPanel(
                     // image is decoded. Displayed bitmaps are GC-managed on our API 23+ baseline;
                     // HWUI may still reference the old frame, so do not recycle it underneath it.
                     hdrWindow.display(checkNotNull(unshown))
+                    if (picturePath != entry.path) { picture.reset(); picturePath = entry.path }
                     imageView.setImageBitmap(unshown); bitmap = unshown; unshown = null
+                    applyPicture()
                     imageView.contentDescription = "图片 ${entry.name}"
                     current = entry; pendingEntry = null; currentSource = media; imageElapsed = 0
                     title.text = entry.name; progress.text = ""; center.visibility = GONE; ready()
@@ -204,6 +295,7 @@ class PlaybackPanel(
                     current = entry; pendingEntry = null; currentSource = media; imageElapsed = 0
                     title.text = entry.name; progress.text = ""; center.text = "正在读取资源…"; center.visibility = VISIBLE
                     imageView.visibility = GONE; playerView.visibility = if (entry.kind == MediaKind.VIDEO) VISIBLE else GONE
+                    applyVideoFraming()
                     if (engine == null) engine = MediaEngine(activity, http, this).also { playerView.player = it.player }
                     val stored = if (options == null) withContext(Dispatchers.IO) { catalog.position(repository.session.site.id, entry) } else 0L
                     val position = if (resumePosition > 0) resumePosition else stored
@@ -333,7 +425,7 @@ class PlaybackPanel(
             while (isActive) {
                 delay(250)
                 val now = SystemClock.elapsedRealtime()
-                if (ready && !paused) {
+                if (ready && !paused && !seek.active) {
                     val entry = current ?: break
                     if (entry.kind == MediaKind.IMAGE) {
                         imageElapsed += now - previous
@@ -344,7 +436,7 @@ class PlaybackPanel(
                         val p = engine?.player
                         val position = p?.currentPosition ?: 0
                         val duration = (p?.duration ?: 0).coerceAtLeast(0)
-                        val label = "${time(position)} / ${if (duration > 0) time(duration) else "--:--"}"
+                        val label = "${time(position)} / ${if (duration > 0) time(duration) else "--:--"}" + if (options == null) " · 收起控制栏后，左右长按加速" else ""
                         if (progress.text.toString() != label) progress.text = label
                         val limit = if (entry.kind == MediaKind.VIDEO) options?.videoSeconds else options?.audioSeconds
                         if (p?.isPlaying == true && limit != null && limit > 0 && position >= limit * 1000L) { advance(1); break }
@@ -356,6 +448,8 @@ class PlaybackPanel(
         }
     }
     private fun togglePause() {
+        seek.cancel()
+        imagePan = false; pictureHelp.visibility = GONE
         if (stopIfExpired()) return
         if (!suspended && !ready && loadJob?.isActive == true) {
             if (options != null && bitmap != null) {
@@ -429,13 +523,47 @@ class PlaybackPanel(
     }
     private fun showControls() {
         if (disposed) return
+        seek.cancel()
         controls.visibility = VISIBLE; pause.requestFocus(); hideJob?.cancel()
         hideJob = scope.launch { delay(5000); if (!paused && ready) hideControls() }
     }
     private fun hideControls() { if (activeDialog == null) { controls.visibility = GONE; requestFocus() } }
-    fun back(): Boolean { if (controls.visibility == VISIBLE) { hideControls(); return true }; return false }
+    fun back(): Boolean {
+        if (seek.active) { seek.cancel(); return true }
+        if (imagePan) { imagePan = false; pictureHelp.visibility = GONE; showControls(); return true }
+        if (controls.visibility == VISIBLE) { hideControls(); return true }; return false
+    }
+    fun windowFocusChanged(focused: Boolean) {
+        if (!focused && seek.active) {
+            seek.cancel(restorePlayback = false); paused = true; pause.text = "继续"; controls.visibility = VISIBLE
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
     fun handleKey(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_UP && seek.release(event.keyCode, event.isCanceled)) return true
         if (event.action != KeyEvent.ACTION_DOWN) return false
+        if (imagePan) {
+            when(event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { if(event.repeatCount==0) imageSettings(); return true }
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    val now = SystemClock.elapsedRealtime()
+                    if(event.repeatCount == 0 || now - lastPanTime >= 50) {
+                        picture.pan(if(event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT) -0.06 else if(event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT) 0.06 else 0.0,
+                            if(event.keyCode==KeyEvent.KEYCODE_DPAD_UP) -0.06 else if(event.keyCode==KeyEvent.KEYCODE_DPAD_DOWN) 0.06 else 0.0)
+                        lastPanTime = now; applyPicture()
+                    }
+                    return true
+                }
+            }
+        }
+        if (options == null && !suspended && activeDialog == null && current?.kind in listOf(MediaKind.VIDEO,MediaKind.AUDIO) &&
+            (seek.active || controls.visibility != VISIBLE || event.keyCode in listOf(KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,KeyEvent.KEYCODE_MEDIA_REWIND)) &&
+            event.keyCode in listOf(KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,KeyEvent.KEYCODE_MEDIA_REWIND)) {
+            val direction = if(event.keyCode in listOf(KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_MEDIA_FAST_FORWARD)) 1 else -1
+            hideJob?.cancel()
+            if (!seek.press(event.keyCode,direction) && event.repeatCount==0) Toast.makeText(activity,"当前资源暂不支持快进 / 快退",Toast.LENGTH_SHORT).show()
+            return true
+        }
         when (event.keyCode) {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { togglePause(); return true }
             KeyEvent.KEYCODE_MEDIA_PLAY -> { if (paused || suspended) togglePause(); return true }
@@ -448,7 +576,6 @@ class PlaybackPanel(
                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                     val direction = if (event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
                     if (options != null || current?.kind == MediaKind.IMAGE) { if (event.repeatCount == 0) advance(direction) }
-                    else engine?.player?.let { if (it.isCurrentMediaItemSeekable) it.seekTo((it.currentPosition + direction * 10_000L).coerceAtLeast(0)) }
                     return true
                 }
             }
@@ -457,9 +584,10 @@ class PlaybackPanel(
         return false
     }
     private fun clearImage() { imageView.setImageDrawable(null); imageView.contentDescription = null; bitmap = null }
-    private fun stopCurrent(keepImage: Boolean = false) { ticker?.cancel(); engine?.stop(); if (!keepImage) clearImage(); ready = false }
+    private fun stopCurrent(keepImage: Boolean = false) { seek.cancel(restorePlayback = false); imagePan = false; pictureHelp.visibility = GONE; ticker?.cancel(); engine?.stop(); if (!keepImage) clearImage(); ready = false }
     fun background() {
         if (disposed) return
+        seek.cancel(restorePlayback = false)
         persistPosition()
         resumePosition = engine?.player?.currentPosition ?: 0
         suspended = true; paused = true
@@ -473,6 +601,7 @@ class PlaybackPanel(
     fun trimMemory() { images.lowMemory = true; nextPrepared.cancel(); hdrWindow.restore(); engine?.trimMemory() }
     fun dispose() {
         if (disposed) return
+        seek.cancel(restorePlayback = false)
         persistPosition()
         disposed = true; activeDialog?.dismiss(); activeDialog = null; nextPrepared.cancel(); source?.close(); scope.cancel(); stopCurrent(); playerView.player = null; engine?.release(); engine = null; hdrWindow.restore()
         activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

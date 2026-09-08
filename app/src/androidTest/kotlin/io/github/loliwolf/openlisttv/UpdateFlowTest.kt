@@ -37,7 +37,7 @@ class UpdateFlowTest {
         while (!condition()) { if (SystemClock.elapsedRealtime() >= end) fail("Timed out"); SystemClock.sleep(30) }
     }
     private fun fixtureBytes(): ByteArray = instrumentation.context.assets.open("update-validation.apk").use { it.readBytes() }
-    private fun release(bytes: ByteArray) = GithubRelease("1.0.1-preview.5", "https://github.com/LoliWolf/OpenListTV/releases/tag/v1.0.1-preview.5", "https://github.com/LoliWolf/OpenListTV/releases/download/v1.0.1-preview.5/OpenListTV-1.0.1-preview.5.apk", "Private fixture; never install", true, bytes.size.toLong(), MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) })
+    private fun release(bytes: ByteArray) = GithubRelease("1.0.1-preview.6", "https://github.com/LoliWolf/OpenListTV/releases/tag/v1.0.1-preview.6", "https://github.com/LoliWolf/OpenListTV/releases/download/v1.0.1-preview.6/OpenListTV-1.0.1-preview.6.apk", "Private fixture; never install", true, bytes.size.toLong(), MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) })
     private inner class Fixture : AutoCloseable {
         val id = UUID.randomUUID().toString()
         val root = File(context.filesDir, "updates/ready/test-$id")
@@ -66,7 +66,7 @@ class UpdateFlowTest {
         Fixture().use { f ->
             val bytes = fixtureBytes(); val valid = release(bytes)
             f.server.enqueue(MockResponse().setBody(Buffer().write(bytes))); val previous = f.packages.obtain(valid, f.network)
-            for ((offer, body) in listOf(valid.copy(sha256 = "0".repeat(64)) to bytes, valid.copy(version = "1.0.1-preview.6", pageUrl = valid.pageUrl.replace("preview.5", "preview.6"), apkUrl = valid.apkUrl!!.replace("preview.5", "preview.6")) to bytes, valid.copy(size = 3, sha256 = null) to byteArrayOf(1,2,3))) {
+            for ((offer, body) in listOf(valid.copy(sha256 = "0".repeat(64)) to bytes, valid.copy(version = "1.0.1-preview.7", pageUrl = valid.pageUrl.replace("preview.6", "preview.7"), apkUrl = valid.apkUrl!!.replace("preview.6", "preview.7")) to bytes, valid.copy(size = 3, sha256 = null) to byteArrayOf(1,2,3))) {
                 f.server.enqueue(MockResponse().setBody(Buffer().write(body)))
                 try { f.packages.obtain(offer, f.network); fail("Bad package accepted") } catch (_: Exception) { }
                 assertTrue(previous.isFile); assertEquals(previous, f.packages.cached()!!.second)

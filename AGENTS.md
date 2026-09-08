@@ -6,7 +6,7 @@
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
 - 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListTV`，稳定 Release 标签 `v1.0.0`。
-- 当前开发分支 `dev/1.0.1`，预发布版本 `1.0.1-preview.4` / versionCode `8`，功能与 preview.3 一致。用户本轮明确授权推送该分支并发布 GitHub 预发布版 `v1.0.1-preview.4`，用于从 preview.3 验证应用内下载更新；此授权取代此前仅本地的限制，但不授权发布正式 1.0.1 或之后版本。保持 prerelease=true、非 Latest，稳定版仍为 v1.0.0。preview.1/2/3 原包保留，不覆盖；后续包 versionCode 继续递增。
+- 当前开发分支 `dev/1.0.1`，已公开预发布 `1.0.1-preview.4` / versionCode `8`；本地迭代 `1.0.1-preview.5` / versionCode `9`。preview.4 的 GitHub 授权不延伸到 preview.5 或正式 1.0.1：本轮只本地开发交付，不推送/建标签/发布。已公开 preview.4 保持 prerelease、非 Latest，稳定版仍为 v1.0.0。旧 APK 不覆盖，后续 versionCode 继续递增。
 - 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
 - 负责人于 2026-09-07 确认 1.0.0 已实测验收。公开文档保持产品功能与必要限制，不列待验证清单；历史工程记录保存在本机忽略的 artifacts/engineering-history 中，不编造额外测试结论。
@@ -73,6 +73,16 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 下载操作可由文件行长按确认键、菜单键或触控长按打开，标准遥控不必有专用菜单键；已用实际 long-press D-pad OK 验证非首项菜单。不要破坏 View 原生长按事件或让键松开后误点播。
 - 用户明确下载的本机副本在清缓存、退出账号和覆盖安装时保留；卸载会删除。只在用户确认后删除精确 UUID 副本/记录；服务器不变。继续未完成下载必须匹配原站点 URL、账号和站点 ID。
 - 导出走系统 CreateDocument 授权（可选 U 盘/其他位置，取决于设备文件提供方），无广泛存储权限。不提供文件选择器的电视仍能本机离线打开。导出中断提醒目标可能有未完成文件，不擅自删除用户选中的外部文档。
+
+### preview.5 画面与遥控进度
+
+- 用户本轮选择视频画面比例、图片手动缩放/旋转、左右长按逐渐加速的快进退。不增加手动选择跳几秒的设置，不改变轮播左右切文件规则。
+- `core/PlaybackControls.kt`：VideoFraming、PictureTransform、AcceleratingSeek 为纯模型。视频有原始完整/铺满裁切/拉伸全屏/16:9/4:3；用现有 PlayerView 和 SurfaceView 调整尺寸，不更换解码器。模式保存在新 SharedPreferences `playback.display` 的 `video.framing`，旧配置不变。
+- 图片 1–4×、90° 步进旋转、复位；ImageView MATRIX 操作当前解码位图，无再下载/再解码/位图复制。用 drawable 的 intrinsic 尺寸计算矩阵并约束平移边界；换新图片复位，同图旋转屏幕/后台恢复保留调整。放大不提升原始解码清晰度。
+- 画面设置内“移动画面”进入独立方向键平移模式；确认重新调整，返回退出移动，不切文件。调整图片暂停轮播并取消预解码，定时停止依然有效，用户手动继续。
+- `RemoteSeekController` 仅在点播音视频、控制栏收起或专用快进退键下工作；控制栏左右仍导航，图片/轮播左右仍切换。短按 10 秒；长按按单调时钟而非 repeatCount 加速，350ms 后 15/45/120/300 倍进度速率（2/5/10 秒分档），没有步长选项。
+- 长按暂停播放器，仅更新目标进度 HUD（100ms），松开一次 seekTo 并恢复原播放/暂停状态，不生成视频预览图或不断触发网络跳转。返回取消；弹窗、失焦、切文件、错误、Home/退出取消，失焦/后台不自动恢复播放。不可定位/未知时长资源提示不支持。
+- 单元测试 PlaybackControlsTest；设备 app/PlaybackControlsTest 验证矩阵、同一 Bitmap、平移/换图、比例、真实 WAV 单次定位、暂停/取消/失焦；tools/playback-controls-ui-smoke.mjs 验证遥控操作与横竖屏。改 KeyEvent 路由时必须保留 ACTION_UP，不能把松键事件提前过滤掉。
 
 ## 数据与升级：不可破坏
 
