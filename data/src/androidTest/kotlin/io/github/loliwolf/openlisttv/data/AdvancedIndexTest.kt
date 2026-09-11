@@ -71,6 +71,7 @@ class AdvancedIndexTest {
         val first=ready(c)
         val consumed=(1..50).map {c.pickScanned(first)!!.path}.toSet()
         c.cancelScan(first)
+        c.clear("s",preserveScanSnapshot=true) // Same-identity activation refreshes browsing only.
         Catalog(context,name).use { reopened ->
             val lease=reopened.reserveScan()
             val view=reopened.openScan(lease,"/folder","s","key",shuffle,1_000_100)

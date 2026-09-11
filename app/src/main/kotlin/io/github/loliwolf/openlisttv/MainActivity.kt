@@ -129,11 +129,15 @@ class MainActivity : ComponentActivity() {
         withContext(Dispatchers.IO) {
             if (oldSite != null && oldSite != session.site.id) catalog.clear(oldSite)
             val previous = sites.sites().firstOrNull { it.id == session.site.id }
-            val changedIdentity = previous != null && (previous.username != session.site.username || previous.url != session.site.url)
+            val previousSession = sites.session(session.site)
+            val changedIdentity = previous != null && (previous.username != session.site.username || previous.url != session.site.url ||
+                previousSession != null && previousSession.basePath != session.basePath)
             sites.save(session)
             // Preserve progress on upgrades/reconnects, but never carry it to another
             // account or server when an existing site's login fields are replaced.
-            catalog.clear(session.site.id, clearHistory = changedIdentity)
+            // Refresh browser metadata after validation, but keep a same-identity slideshow
+            // snapshot. Its own root/filter/TTL checks still run before any cache reuse.
+            catalog.clear(session.site.id, clearHistory = changedIdentity, preserveScanSnapshot = !changedIdentity)
         }
         repository = FileRepository(session, api, catalog)
         sort = sites.sort(session.site); currentPath = "/"; offset = 0; focusMemory.clear(); queries.clear()

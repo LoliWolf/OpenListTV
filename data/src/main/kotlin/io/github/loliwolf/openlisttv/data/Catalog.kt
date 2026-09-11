@@ -110,8 +110,9 @@ class Catalog(context: Context, name: String = "catalog.db", private val entryLi
         return Listing(entries, total)
     }
     internal val lastPageUsedCursor get() = paging.lastUsedCursor
-    @Synchronized fun clear(site: String? = null, clearHistory: Boolean = false) {
-        scans.clear(); entryCount = null; counts.clear(); paging.reset()
+    @Synchronized fun clear(site: String? = null, clearHistory: Boolean = false, preserveScanSnapshot: Boolean = false) {
+        if (preserveScanSnapshot && !clearHistory) scans.detach() else scans.clear()
+        entryCount = null; counts.clear(); paging.reset()
         val db = writableDatabase
         if (site == null) { db.delete("entries", null, null); db.delete("directories", null, null) }
         else { db.delete("entries", "site=?", arrayOf(site)); db.delete("directories", "site=?", arrayOf(site)); if (clearHistory) db.delete("progress", "site=?", arrayOf(site)) }

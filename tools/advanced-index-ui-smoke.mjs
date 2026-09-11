@@ -21,8 +21,12 @@ if(process.argv[2])console.log(await run('install','-r',process.argv[2]));
 await run('shell','am','force-stop',app);await launch();await waitText('9 项');await dialog();
 assert.equal((await focus('超大库公平抽样',19)).checked,'true');
 assert.equal((await focus(reuse)).checked,'true');assert.equal((await focus(force)).checked,'false');
+// Normal session validation intentionally refreshes the browser's root listing. Measure
+// the slideshow itself after that refresh, not all traffic since the previous process.
+const beforeWarm=(await metrics()).listRequests;
+assert.ok(beforeWarm>=afterCold);
 await startAndStop();
-assert.equal((await metrics()).listRequests,afterCold,'Warm snapshot should not request directory lists again');
+assert.equal((await metrics()).listRequests,beforeWarm,'Warm snapshot should not request directory lists again');
 console.log('PASS D-pad sampling/reuse/one-shot rescan; restart/overwrite preserves choices and avoids list re-scan');
 await dialog();await focus(previous.mode,19);await key(23);
 await toggle('包含子目录',previous.recursive);await toggle('仅图片',previous.images);await toggle(reuse,previous.reuse);await setNumber(duration,previous.duration);

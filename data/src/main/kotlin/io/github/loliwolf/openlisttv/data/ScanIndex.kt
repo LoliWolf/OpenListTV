@@ -30,6 +30,7 @@ internal class ScanIndex(private val database: () -> SQLiteDatabase, private val
 
     fun reserve() = ++generation
     fun cancel(lease: Long) { if (generation == lease) generation++ }
+    fun detach() { generation++; view = view.copy(scanning=false,refreshing=false) }
     private fun requireLease(lease: Long) { if (generation != lease) throw CancellationException("Superseded scan") }
     fun clear() {
         generation++; view = ScanView(0, 0, false, false, false, false)
