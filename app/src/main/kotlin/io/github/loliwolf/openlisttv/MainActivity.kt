@@ -129,9 +129,10 @@ class MainActivity : ComponentActivity() {
         withContext(Dispatchers.IO) {
             if (oldSite != null && oldSite != session.site.id) catalog.clear(oldSite)
             val previous = sites.sites().firstOrNull { it.id == session.site.id }
-            val previousSession = sites.session(session.site)
-            val changedIdentity = previous != null && (previous.username != session.site.username || previous.url != session.site.url ||
-                previousSession != null && previousSession.basePath != session.basePath)
+            // Stored sessions contain only a token, so their default basePath is not an
+            // earlier validated root. The snapshot identity checks the current validated
+            // basePath separately; never clear valid caches by comparing it with that default.
+            val changedIdentity = previous != null && (previous.username != session.site.username || previous.url != session.site.url)
             sites.save(session)
             // Preserve progress on upgrades/reconnects, but never carry it to another
             // account or server when an existing site's login fields are replaced.
