@@ -33,7 +33,7 @@ class UpgradeTest {
         Catalog(context, name).use { catalog ->
             val e = catalog.page("old", "/", 0, 100, SortOrder()).entries.single()
             assertEquals(if (version >= 2) "old-thumb" else "", e.thumbnail); assertEquals(5_000_000_000, e.size)
-            assertEquals(3, catalog.readableDatabase.version)
+            assertEquals(4, catalog.readableDatabase.version)
             catalog.readableDatabase.rawQuery("SELECT size,modified FROM scan_items", null).use {
                 assertTrue(it.moveToFirst()); assertEquals(-1L, it.getLong(0)); assertEquals("", it.getString(1))
             }
@@ -58,6 +58,9 @@ class UpgradeTest {
         val restored = SiteStore(isolated)
         assertEquals(site, restored.active()); assertEquals("fixture-session", restored.session(site)?.token)
         assertEquals(SortOrder(SortField.SIZE, true, false), restored.sort(site)); assertEquals(options, restored.slideshow())
+        val sampling = options.copy(mode=TraversalMode.RESERVOIR,reuseIndex=false,forceRescan=true)
+        first.setSlideshow(sampling)
+        assertEquals(sampling.copy(forceRescan=false), SiteStore(isolated).slideshow())
         restored.remove(site)
     }
 }

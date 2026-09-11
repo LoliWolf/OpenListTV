@@ -291,6 +291,8 @@ class MainActivity : ComponentActivity() {
         TraversalMode.entries.forEachIndexed { i, mode -> modes.addView(RadioButton(this).apply { id = modeIds[i]; text = mode.label; textSize = 17f; isChecked = mode == options.mode }) }
         val recursive = TvUi.check(this, "包含子目录", options.recursive)
         val imageOnly = TvUi.check(this, "仅图片", options.imageOnly)
+        val reuseIndex = TvUi.check(this, "复用轮播索引（6 小时）", options.reuseIndex)
+        val forceRescan = TvUi.check(this, "本次重新扫描（忽略旧快照）", false)
         val imageSeconds = TvUi.input(this, "图片停留秒数（1–3600）", options.imageSeconds.toString(), "秒").apply { inputType = InputType.TYPE_CLASS_NUMBER }
         val videoSeconds = TvUi.input(this, "视频秒数（0 表示播放到结束）", options.videoSeconds.toString(), "秒").apply { inputType = InputType.TYPE_CLASS_NUMBER }
         val audioSeconds = TvUi.input(this, "音频秒数（0 表示播放到结束）", options.audioSeconds.toString(), "秒").apply { inputType = InputType.TYPE_CLASS_NUMBER }
@@ -298,6 +300,9 @@ class MainActivity : ComponentActivity() {
         val prefetch = TvUi.check(this, "预取音视频地址（图片始终预加载一张）", options.prefetch)
         form.addView(TvUi.text(this, "播放方式", 13f, TvUi.accent)); form.addView(modes)
         form.addView(recursive); form.addView(imageOnly); form.addView(TvUi.spacer(this, 12))
+        form.addView(TvUi.text(this, "公平抽样：最多 1 万候选，继续扫描整个可访问范围；可能重复，不保证每张都播到。扫描完成前仅针对已读部分抽样。", 13f, TvUi.muted))
+        form.addView(reuseIndex); form.addView(forceRescan)
+        form.addView(TvUi.text(this, "索引复用适用于全树随机和公平抽样。6 小时内免重扫；6–24 小时先播旧快照并在前台重扫，超过 24 小时重建。仅保留最近一个范围；有目录密码时不跨会话复用。", 13f, TvUi.muted))
         form.addView(TvUi.text(this, "播放时长", 13f, TvUi.accent)); form.addView(TvUi.spacer(this, 8))
         listOf(imageSeconds, videoSeconds, audioSeconds).forEach(form::addView)
         form.addView(TvUi.text(this, "图片：到时切换。视频 / 音频：填 0 播放到结束，填其他数字则最多播放该时长。", 14f, TvUi.muted))
@@ -310,9 +315,9 @@ class MainActivity : ComponentActivity() {
         slideshowSettings = dialog
         dialog.setOnDismissListener { if (slideshowSettings === dialog) slideshowSettings = null }
         dialog.setOnShowListener {
-            TvUi.verticalFocus(imageSeconds, videoSeconds, audioSeconds, stopMinutes, prefetch, dialog.getButton(AlertDialog.BUTTON_POSITIVE))
+            TvUi.verticalFocus(*(modeIds.map { modes.findViewById<View>(it) } + listOf(recursive, imageOnly, reuseIndex, forceRescan, imageSeconds, videoSeconds, audioSeconds, stopMinutes, prefetch, dialog.getButton(AlertDialog.BUTTON_POSITIVE))).toTypedArray())
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val o = runCatching { SlideshowOptions(TraversalMode.entries[modeIds.indexOf(modes.checkedRadioButtonId).coerceAtLeast(0)], recursive.isChecked, imageOnly.isChecked, imageSeconds.text.toString().toInt(), videoSeconds.text.toString().toInt(), audioSeconds.text.toString().toInt(), prefetch.isChecked, stopMinutes.text.toString().toInt()) }.getOrNull()
+                val o = runCatching { SlideshowOptions(TraversalMode.entries[modeIds.indexOf(modes.checkedRadioButtonId).coerceAtLeast(0)], recursive.isChecked, imageOnly.isChecked, imageSeconds.text.toString().toInt(), videoSeconds.text.toString().toInt(), audioSeconds.text.toString().toInt(), prefetch.isChecked, stopMinutes.text.toString().toInt(), reuseIndex.isChecked, forceRescan.isChecked) }.getOrNull()
                 if (o == null) { Toast.makeText(this, "图片 1–3600 秒，音视频 0–3600 秒，定时停止 0–1440 分钟", Toast.LENGTH_LONG).show(); return@setOnClickListener }
                 sites.setSlideshow(o); dialog.dismiss(); openPlayer(null, 0, o)
             }

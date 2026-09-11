@@ -45,7 +45,7 @@ class SeamlessSlideshowTest {
         val end = SystemClock.elapsedRealtime() + timeout
         while (!condition()) { if (SystemClock.elapsedRealtime() > end) fail("Timed out waiting for condition"); SystemClock.sleep(30) }
     }
-    private inner class Fixture(val delaySecond: AtomicLong = AtomicLong(0), val badSecond: Boolean = false, val rateLimited: Boolean = false, val prefetch: Boolean = true, val oversizedSecond: Boolean = false, val largeShuffle: Boolean = false) : AutoCloseable {
+    private inner class Fixture(val delaySecond: AtomicLong = AtomicLong(0), val badSecond: Boolean = false, val rateLimited: Boolean = false, val prefetch: Boolean = true, val oversizedSecond: Boolean = false, val largeShuffle: Boolean = false, val reservoir: Boolean = false) : AutoCloseable {
         val requests = CopyOnWriteArrayList<Pair<String, Long>>()
         val frames = CopyOnWriteArrayList<Pair<String, Long>>()
         val violations = CopyOnWriteArrayList<String>()
@@ -88,7 +88,7 @@ class SeamlessSlideshowTest {
             activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
             var created: PlaybackPanel? = null
             onMain {
-                created = PlaybackPanel(activity, repository, catalog, "/", SortOrder(), SlideshowOptions(mode = if (largeShuffle) TraversalMode.SHUFFLE else TraversalMode.ORDERED, recursive = false, imageOnly = true, imageSeconds = 1, prefetch = prefetch), scope, {}, { null })
+                created = PlaybackPanel(activity, repository, catalog, "/", SortOrder(), SlideshowOptions(mode = if (reservoir) TraversalMode.RESERVOIR else if (largeShuffle) TraversalMode.SHUFFLE else TraversalMode.ORDERED, recursive = false, imageOnly = true, imageSeconds = 1, prefetch = prefetch), scope, {}, { null })
                 activity.setContentView(created!!)
             }
             panel = created!!; photo = panel.getChildAt(1) as ImageView; center = panel.getChildAt(2) as TextView
@@ -169,6 +169,13 @@ class SeamlessSlideshowTest {
             val gaps = f.frames.take(8).zipWithNext { a, b -> b.second - a.second }
             assertTrue("Unexpected long gap while indexing: $gaps", gaps.all { it in 850..3000 })
             println("LARGE_SHUFFLE frameGapsMs=$gaps frames=${f.frames.size} candidates=${f.catalog.scannedCount()}")
+        }
+    }
+    @Test fun reservoirReplacementKeepsAlreadyPreparedImagesAndSeamlessFrames() {
+        Fixture(largeShuffle = true, reservoir = true).use { f ->
+            eventually(20_000) { f.frames.size >= 8 && f.catalog.scannedCount() == 10_000 }
+            f.checkScreenPixels(); assertTrue(f.violations.toString(),f.violations.isEmpty())
+            assertTrue(f.frames.take(8).zipWithNext { a,b -> b.second-a.second }.all { it in 850..3000 })
         }
     }
     @Test fun legacyAddressPrefetchOffDoesNotDisableImagePredecode() {

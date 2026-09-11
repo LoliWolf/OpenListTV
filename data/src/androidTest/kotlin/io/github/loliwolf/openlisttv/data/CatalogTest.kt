@@ -27,7 +27,7 @@ class CatalogTest {
         catalog.begin("a", "/")
         val entries = (1..50).map { Entry("/$it.jpg", "$it.jpg", false) }
         catalog.insert("a", "/", entries); catalog.finish("a", "/", 50)
-        catalog.startScan("/"); entries.forEach(catalog::addScanned)
+        val generation = catalog.startScan("/"); catalog.appendScan(generation, "a", "/", entries, SlideshowOptions())
         val first = (1..50).map { catalog.shuffled("a", 1, false)!!.path }
         assertEquals(50, first.toSet().size); assertNull(catalog.shuffled("a", 1, false))
         assertNotNull(catalog.shuffled("a", 2, false))
@@ -43,7 +43,7 @@ class CatalogTest {
         catalog.appendScan(generation, "a", "/", listOf(second), SlideshowOptions())
         assertEquals(2, catalog.scannedCount(generation))
         repeat(100) { assertNotNull(catalog.shuffled("a", 1, true, generation)) }
-        val rows = catalog.readableDatabase.rawQuery("SELECT rowid FROM scan_items ORDER BY rowid", null).use { c -> buildList { while (c.moveToNext()) add(c.getInt(0)) } }
+        val rows = catalog.readableDatabase.rawQuery("SELECT rowid FROM candidate_0 ORDER BY rowid", null).use { c -> buildList { while (c.moveToNext()) add(c.getInt(0)) } }
         assertEquals(listOf(1, 2), rows)
     }
     @Test fun searchAndTypeFilterAreLiteralLocalAndPaged() {

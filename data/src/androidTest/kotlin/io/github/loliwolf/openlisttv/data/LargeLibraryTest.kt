@@ -68,7 +68,7 @@ class LargeLibraryTest {
             val pageSize = db.rawQuery("PRAGMA page_size", null).use { it.moveToFirst(); it.getLong(0) }
             val size = db.rawQuery("PRAGMA page_count", null).use { it.moveToFirst(); it.getLong(0) * pageSize }
             assertTrue(size <= Budgets.INDEX_BYTES)
-            val plans = listOf("SELECT path,size,modified FROM scan_items WHERE rowid=10", "SELECT path,size,modified FROM scan_items WHERE round=0 ORDER BY shuffle_key LIMIT 1")
+            val plans = listOf("SELECT path,size,modified FROM candidate_0 WHERE rowid=10", "SELECT path,size,modified FROM candidate_0 WHERE round=0 ORDER BY shuffle_key LIMIT 1")
             plans.forEach { sql ->
                 val plan = db.rawQuery("EXPLAIN QUERY PLAN $sql", null).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(3)) }.joinToString() }
                 assertFalse(plan, plan.contains("TEMP B-TREE")); assertTrue(plan, plan.contains("SEARCH"))

@@ -4,7 +4,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlin.random.Random
 
-enum class TraversalMode(val label: String) { ORDERED("顺序深度遍历"), WALK("随机游走"), SHUFFLE("全目录树随机") }
+enum class TraversalMode(val label: String) { ORDERED("顺序深度遍历"), WALK("随机游走"), SHUFFLE("全目录树随机"), RESERVOIR("超大库公平抽样") }
 data class SlideshowOptions(
     val mode: TraversalMode = TraversalMode.ORDERED,
     val recursive: Boolean = true,
@@ -14,6 +14,8 @@ data class SlideshowOptions(
     val audioSeconds: Int = 0,
     val prefetch: Boolean = true,
     val stopAfterMinutes: Int = 0,
+    val reuseIndex: Boolean = true,
+    val forceRescan: Boolean = false,
 ) {
     init {
         require(imageSeconds in 1..3600)

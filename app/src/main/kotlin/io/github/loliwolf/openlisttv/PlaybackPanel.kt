@@ -52,6 +52,7 @@ class PlaybackPanel(
     private var bitmap: Bitmap? = null
     private var source: TraversalSource? = null
     private var traversalWarning: String? = null
+    private var forceScanUsed = false
     private val history = PlaybackHistory()
     private var loadJob: Job? = null
     private var ticker: Job? = null
@@ -188,11 +189,14 @@ class PlaybackPanel(
         presentDialog(dialog); refresh()
     }
     private fun createSource(): TraversalSource? {
-        val o = options ?: return null
+        val requested = options ?: return null
+        val o = requested.copy(forceRescan = requested.forceRescan && !forceScanUsed)
+        forceScanUsed = true
         val factories: Map<TraversalMode, () -> TraversalSource> = mapOf(
             TraversalMode.ORDERED to { OrderedTraversal(rootPath, repository.reader(sort), o) },
             TraversalMode.WALK to { RandomWalkTraversal(rootPath, repository.reader(sort), o) },
             TraversalMode.SHUFFLE to { ShuffleTraversal(rootPath, repository, o, scope) },
+            TraversalMode.RESERVOIR to { ShuffleTraversal(rootPath, repository, o, scope) },
         )
         return factories.getValue(o.mode).invoke()
     }

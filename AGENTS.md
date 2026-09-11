@@ -6,7 +6,7 @@
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
 - 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListTV`，稳定 Release 标签 `v1.0.0`。
-- 当前开发分支 `dev/1.0.1`，已公开预发布 `1.0.1-preview.7` / versionCode `11`；本地迭代 `1.0.1-preview.8` / versionCode `12`，优化大目录索引和全树轮播。用户的 preview.7 发布授权不延伸到 preview.8 或正式版：本轮只本地交付，不推送/建标签/发布。公开 preview.7 为 prerelease、非 Latest，稳定版仍为 v1.0.0。旧 APK/标签不覆盖，后续 versionCode 继续递增。
+- 当前开发分支 `dev/1.0.1`，已公开预发布 `1.0.1-preview.7` / versionCode `11`；本地迭代 `1.0.1-preview.9` / versionCode `13`，加入索引快照复用、游标分页和可选公平抽样。用户的 preview.7 发布授权不延伸到之后版本：本轮只本地交付，不推送/建标签/发布。公开 preview.7 为 prerelease、非 Latest，稳定版仍为 v1.0.0。旧 APK/标签不覆盖，后续 versionCode 继续递增。
 - 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
 - 负责人于 2026-09-07 确认 1.0.0 已实测验收。公开文档保持产品功能与必要限制，不列待验证清单；历史工程记录保存在本机忽略的 artifacts/engineering-history 中，不编造额外测试结论。
@@ -16,7 +16,7 @@
 
 - 性能与占用优先，不引入 Flutter、WebView 壳、服务端、全量 FFmpeg/VLC 或后台常驻。
 - Android 14 / 2 GB RAM 为主要目标，尽量兼容 API 23；最高 4K 按资源与硬件能力运行。1.0.1 新需求扩展 HDR：视频走 Media3/MediaCodec/SurfaceView，Ultra HDR 图片走系统 gainmap；不加入软件转码器。
-- 账号密码、多站点保存/单活动站点、只读文件浏览、播放、排序及三种可扩展轮播均保留。TOTP/SSO/访客等不是当前已实现能力。
+- 账号密码、多站点保存/单活动站点、只读文件浏览、播放、排序及原三种轮播均保留；preview.9另增可选公平抽样模式。TOTP/SSO/访客等不是当前已实现能力。
 - 无低清源且无法解码时轮播跳过，不做客户端实时转码；5 GB 视频可以流式播放，文件大小不等于运存需求。
 - 方向与已有实现冲突或不符合最佳实践时，实施前向用户指出事实与取舍。
 - 本项目没有 Nacos/MySQL 依赖。若后续任务确实涉及：Nacos 使用 API，配置来自 env；MySQL 使用 `dbx`，不要自行另建访问路径或暴露 env。
@@ -45,7 +45,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 ### 资源预算与播放
 
 - 目录每页 100 条，UI/缩略图只保留当前页＋下一页，滚动后淘汰旧页。完整排序的元数据可索引全目录，不等于下载全目录图片。
-- 索引数据库总计仍最多 64 MiB，浏览完整排序条目和精简轮播候选各有 100,000 条上限，深度最多 128；目录变化、截断和达到上限必须提示。候选不再依赖浏览 entries；到预算后只循环已发现项，不声称覆盖全库。
+- 索引数据库总计仍最多64 MiB；浏览完整排序最多10万条，普通全树随机每个候选区最多10万，公平抽样最多1万。刷新至多两个磁盘候选区共享同一64MiB上限，不增加位图预算。深度128、扫描目录累计10万上限仍提示范围受限，不声称无限库或全覆盖。
 - 缩略图最多 2 并发，内存 LRU 8 MiB，PNG 磁盘缓存 16 MiB；无 thumb 时只为可见项串行生成原图预览。
 - 1.0.1 图片临时输入最多 128 MiB，保留至少 8 MiB 磁盘余量；列表原图回退仍限 32 MiB，避免为小缩略图下载巨型原图。音视频缓冲目标仍为 24 MiB，只有一个播放器。
 - 单文件超限属于 RESOURCE_LIMIT，轮播应跳过；真实磁盘/索引容量故障属于 CAPACITY，暂停。不能再次把图片超限归入全局容量故障。
@@ -87,7 +87,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 ## 数据与升级：不可破坏
 
 - versionCode 必须单调增加；包名、签名、SharedPreferences 名称 `sites` / `sessions.encrypted`、Keystore alias `openlisttv.sessions.v1` 保持兼容。
-- Catalog SQLite 当前版本 3；v1→v2 只增加 thumbnail 列，v2→v3 只为 scan_items 增加 size / modified 两列。downloads.db 仍为 v2。必须增量迁移，不能删表重建。
+- Catalog SQLite 当前版本4；v1→v2增加thumbnail，v2→v3增加scan_items的size/modified，v3→v4仅新增candidate_0/candidate_1及scan_snapshot，不删除旧表或账号/进度。downloads.db仍v2。排序加速索引按需创建，不在升级时全量重建。
 - 普通重连/清缓存保留配置与播放进度；退出账号或明确替换账号/服务器身份才清原身份历史。
 - 不通过卸载、pm clear、重置密钥来解决用户升级问题。清数据开关只允许专用模拟器的合成 fixture 测试。
 
@@ -101,6 +101,17 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - reserveScan 在异步初始化前取得代次，所有异步队列/候选操作核对代次；旧任务取消后不能清空或污染新会话。扫描状态采样与轮次切换必须使用同一快照，避免空表转完成时误跳轮次。
 - IndexBudgetReached 仅表示软件索引限额；为后续轮次更新留512KiB以上磁盘预算。达到条目/深度/数据库预算后停止新增，但继续已发现资源，并在控制栏及一次提示中明确未覆盖全部范围。不自动遍历超限后剩余目录；不是无限库保证。实际磁盘空间不足/IO故障、鉴权、限流、网络错误仍暂停，不伪装成预算可继续。
 - data/LargeLibraryTest 覆盖4×3万文件、容量边界后继续、首批先播、精简索引/浏览淘汰/进度保留、三轮不重复、代次取消、分页回退与失败分类；SeamlessSlideshowTest 增加3万文件边扫描边播放的实际帧/像素回归。测试均使用专用模拟器与合成资源，不表述成极米实测速度。
+
+### preview.9 快照、游标与公平抽样
+
+- 用户本轮明确要求三项全部实现。RESERVOIR作为第四模式追加，原SHUFFLE规则不替换。core/ReservoirSampler是Algorithm R，稳定无重复的输入流上均匀入选；仅返回槽号，常数状态，不引入算法库。候选在SQLite中占最多1万槽，继续读取后续分页，首次完整扫描网络量不减少。抽样可能重复，不保证每张都播到；扫描中只代表已读部分。队列/深度/磁盘限额触发时明确部分范围。
+- data/ScanIndex统一拥有两个磁盘区和一条最近范围快照；API读取仍串行500条，图像OneAhead不变。抽样替换用原ROWID槽位UPDATE，不逐项DELETE/AUTOINCREMENT/REPLACE，不破坏稠密槽位。前台播放器已预约的Entry是不可变副本，不随池替换变化。
+- 最近快照按站点ID、服务器URL、用户名、basePath、根路径、模式、递归、仅图片隔离，持久化身份摘要不含token或密码。记忆了任何目录密码时不保存/复用快照。每次媒体仍重新fs/get，不提供绕过鉴权的离线服务器访问。
+- 进入轮播时：缓存0–6小时直接复用；6–24小时先播旧快照并在前台扫描另一区；超过24小时、时钟回退或身份/范围变化重新构建。仅保存最近一个范围。旧快照有效期不因失败/预算截断的刷新而延长；这类刷新不替换旧池。普通扫描完成或明确限额停止才发布快照，取消/网络等错误不提交半成品。无服务端快照/变更日志，不仅凭条目数判断内容没变。
+- 设置新增“复用轮播索引（6小时）”，偏好sites/slide.reuseIndex，默认true；“本次重新扫描”仅本次启动，不持久化，Home返回不重复强制。完整重连刷新/清缓存使快照失效；登出/账号更换原清理流程仍隔离历史。没有Service/WorkManager/定时后台扫描。
+- data/CatalogPaging提供256个有界排序键书签，顺序前翻使用索引区间游标；未访问的任意跳页或已淘汰书签可回退OFFSET。支持全部排序/升降序/文件夹置顶/NULL末置/自然序同键及字面搜索筛选；目录写入/淘汰清空书签和计数缓存。游标分解为互斥词典序区间，兼容API23无row-value语法；表达式NULL键绑定显式CAST整数，不能按TEXT比较。
+- 全库只保留一个按当前排序匹配的browse_seek自适应索引，不为所有组合各建索引。索引创建遇软件磁盘限额保留旧索引、继续正确查询；API23旧SQLite不支持NULL表达式索引时回退正确但可能较慢的查询。新索引占用仍计入64MiB预算，不能把SQL微基准倍数当成整页或整机加速。
+- 测试：core/ReservoirSamplerTest固定种子均匀性/百万项槽位边界；data/AdvancedIndexTest覆盖全部排序、游标跳转/失效、v3迁移、6/24小时/强制/身份隔离、重开后续轮、缓存前台刷新原子切换/失败不续期、百万候选输入及源级免API重扫。SeamlessSlideshowTest增加抽样池替换期间实际像素/帧连续回归。tools/advanced-index-ui-smoke.mjs验证遥控选项、覆盖升级保留与二次启动免列表请求。
 
 ## 构建与本机工具
 
