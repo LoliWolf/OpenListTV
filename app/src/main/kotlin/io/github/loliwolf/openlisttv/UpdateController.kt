@@ -209,21 +209,21 @@ class UpdateController(
     }
     private fun notice(text: String) { if (!activity.isFinishing && !activity.isDestroyed) Toast.makeText(activity, text, Toast.LENGTH_LONG).show() }
     fun addSettings(content: LinearLayout) {
-        fun toggle(label: String, checked: Boolean, change: (Boolean) -> Unit) = Switch(activity).apply {
-            text = label; textSize = 16f; isChecked = checked; isFocusable = true; minHeight = activity.dp(48); setTextColor(TvUi.foreground)
-            id = View.generateViewId(); contentDescription = label
-            background = TvUi.focusBackground(false, activity.dp(12).toFloat()); setPadding(activity.dp(12), 0, activity.dp(12), 0)
-            setOnCheckedChangeListener { _, value -> change(value) }
-        }
+        fun toggle(label: String, checked: Boolean, change: (Boolean) -> Unit) = UiPanels.toggle(activity, label, checked, change)
         content.addView(toggle("自动检测更新（每次启动）", automatic) { automatic = it })
         content.addView(toggle("参与测试版本", testing) { testing = it })
         content.addView(toggle("使用浏览器下载", browserDownload) { browserDownload = it })
-        content.addView(TvUi.text(activity, "开启后点更新只打开 APK 下载链接，不在应用内下载或唤起安装。保存位置由浏览器决定；HTTP/SOCKS5 代理不会带入浏览器，HTTPS 加速前缀会保留。", 13f, TvUi.muted))
+        content.addView(UiPanels.section(activity, "连接方式"))
         val proxyStatus = TvUi.text(activity, "", 13f, TvUi.muted)
         fun refresh() { proxyStatus.text = runCatching { proxy().let { if (it.address.isEmpty()) "更新代理：未配置（直连）" else "更新代理：${it.mode.label} · ${it.address}" } }.getOrDefault("更新代理配置无效，请修改或清除") }
         refresh()
-        content.addView(TvUi.button(activity, "配置更新代理") { proxyDialog { refresh() } }); content.addView(proxyStatus)
-        content.addView(TvUi.text(activity, "仅更新检查和安装包下载使用代理，不影响 OpenList。测试版本包含已发布的预发布包，不含草稿。新版本由系统确认安装。", 13f, TvUi.muted))
+        content.addView(UiPanels.Preference(activity, "配置更新代理", "仅更新使用，不影响资源连接", "") { proxyDialog { refresh() } })
+        proxyStatus.setPadding(activity.dp(16), activity.dp(4), activity.dp(16), activity.dp(8)); content.addView(proxyStatus)
+        content.addView(UiPanels.Preference(activity, "了解更新方式", "浏览器下载、测试版本与安装说明", "") {
+            show(AlertDialog.Builder(activity).setTitle("更新方式")
+                .setMessage("浏览器下载：只打开 APK 链接，保存与安装由浏览器和系统处理。浏览器不继承 HTTP / SOCKS5 代理，HTTPS 加速前缀保留。\n\n测试版本：包括已发布的预发布包，不含草稿。\n\n应用内下载：下载校验后唤起系统安装，仍需用户确认。覆盖安装保留配置。")
+                .setPositiveButton("知道了", null).create())
+        })
     }
     private fun proxyDialog(saved: () -> Unit) {
         checkJob?.cancel(); pending = null; pendingMessage = null

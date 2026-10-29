@@ -9,8 +9,8 @@ class FileGlyph(private val entry: Entry?) : Drawable() {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     override fun draw(canvas: Canvas) {
         canvas.save(); canvas.translate(bounds.left.toFloat(), bounds.top.toFloat()); canvas.scale(bounds.width() / 48f, bounds.height() / 48f)
-        val color = if (entry?.directory == true) Color.rgb(65, 137, 207) else when (entry?.kind) {
-            MediaKind.IMAGE -> Color.rgb(70, 151, 190); MediaKind.VIDEO -> Color.rgb(129, 103, 171); MediaKind.AUDIO -> Color.rgb(46, 150, 137); else -> Color.rgb(141, 151, 167)
+        val color = if (entry?.directory == true) Color.rgb(94, 136, 107) else when (entry?.kind) {
+            MediaKind.IMAGE -> Color.rgb(72, 131, 133); MediaKind.VIDEO -> Color.rgb(177, 119, 79); MediaKind.AUDIO -> Color.rgb(112, 137, 72); else -> Color.rgb(133, 145, 134)
         }
         paint.style = Paint.Style.FILL; paint.color = color
         if (entry?.directory == true) {

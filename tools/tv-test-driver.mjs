@@ -29,7 +29,10 @@ export async function focus(label, fallback = 20, max = 24) {
     if (current && (current.text === label || current['content-desc'] === label)) return current;
     const target = list.find(n => n.text === label || n['content-desc'] === label);
     let direction = fallback;
-    if (current && target) { const a = point(current), b = point(target); direction = Math.abs(b.y - a.y) > 25 ? b.y > a.y ? 20 : 19 : b.x > a.x ? 22 : 21; }
+    // Footer buttons sit outside the scroll viewport. If a requested row is clipped,
+    // return into the form rather than repeatedly pressing Down at its bottom edge.
+    if (!target && ['关闭', '取消', '完成', '开始'].includes(current?.text)) direction = 19;
+    if (current && target && current.class !== 'android.widget.ScrollView') { const a = point(current), b = point(target); direction = Math.abs(b.y - a.y) > 25 ? b.y > a.y ? 20 : 19 : b.x > a.x ? 22 : 21; }
     await key(direction);
   }
   throw new Error(`Cannot focus ${label}; current=${JSON.stringify((await nodes()).find(n => n.focused === 'true'))}`);

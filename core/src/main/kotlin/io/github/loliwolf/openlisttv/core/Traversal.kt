@@ -16,11 +16,13 @@ data class SlideshowOptions(
     val stopAfterMinutes: Int = 0,
     val reuseIndex: Boolean = true,
     val forceRescan: Boolean = false,
+    val autoRefreshMinutes: Int = 0,
 ) {
     init {
         require(imageSeconds in 1..3600)
         require(videoSeconds in 0..3600 && audioSeconds in 0..3600)
         require(stopAfterMinutes in 0..1440)
+        require(autoRefreshMinutes == 0 || autoRefreshMinutes in 5..1440)
     }
     fun accepts(e: Entry) = !e.directory && e.kind != MediaKind.OTHER && (!imageOnly || e.kind == MediaKind.IMAGE) && !e.name.startsWith("._")
 }
@@ -35,6 +37,19 @@ interface TraversalSource {
     val warning: String? get() = null
     suspend fun next(): Entry?
     fun close() {}
+}
+
+enum class RefreshRequest { STARTED, BUSY, UNAVAILABLE }
+data class IndexStatus(
+    val count: Int, val seen: Long, val scanning: Boolean, val refreshing: Boolean,
+    val scannedCount: Int, val scannedSeen: Long, val directories: Int,
+    val updatedAt: Long?, val reused: Boolean, val limited: String?, val message: String?,
+    val automaticPaused: Boolean = false,
+)
+interface RefreshableTraversal : TraversalSource {
+    val indexStatus: IndexStatus
+    /** Non-blocking, single-flight; never changes the currently displayed/prepared media. */
+    fun requestRefresh(): RefreshRequest
 }
 
 class OrderedTraversal(private val root: String, private val reader: DirectoryReader, private val options: SlideshowOptions) : TraversalSource {

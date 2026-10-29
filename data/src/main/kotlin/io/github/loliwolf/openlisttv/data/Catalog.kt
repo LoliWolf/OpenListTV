@@ -11,6 +11,10 @@ import io.github.loliwolf.openlisttv.core.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.selects.onTimeout
+import java.util.concurrent.atomic.AtomicBoolean
 import java.time.Instant
 import kotlin.random.Random
 
@@ -127,7 +131,8 @@ class Catalog(context: Context, name: String = "catalog.db", private val entryLi
     @Synchronized internal fun openScan(generation: Long, root: String, site: String, key: String?, options: SlideshowOptions, now: Long = System.currentTimeMillis()) = scans.open(generation, site, root, key, options, now)
     @Synchronized internal fun scanView(generation: Long) = scans.info(generation)
     @Synchronized internal fun finishScan(generation: Long, limited: String?, now: Long = System.currentTimeMillis()) = scans.finish(generation, limited, now)
-    @Synchronized internal fun failedScan(generation: Long) = scans.failed(generation)
+    @Synchronized internal fun failedScan(generation: Long, message: String? = null) = scans.failed(generation, message)
+    @Synchronized internal fun refreshScan(generation: Long) = scans.refresh(generation)
     @Synchronized internal fun pickScanned(generation: Long) = scans.pick(generation)
     @Synchronized fun invalidateScanSnapshot() = scans.invalidate()
     @Synchronized fun cancelScan(generation: Long) = scans.cancel(generation)
@@ -254,15 +259,27 @@ class FileRepository(val session: Session, private val gateway: FileGateway, val
 }
 
 class ShuffleTraversal(private val root: String, private val repository: FileRepository, private val options: SlideshowOptions, parent: CoroutineScope,
-    private val clock: () -> Long = System::currentTimeMillis) : TraversalSource {
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val refreshIntervalMillis: Long = options.autoRefreshMinutes * 60_000L) : RefreshableTraversal {
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + Dispatchers.IO)
     private val nextLock = Mutex()
     private var reservedPick: Entry? = null
-    private var started = false
+    @Volatile private var started = false
+    private val refreshRequests = Channel<Unit>(1)
+    private val busy = AtomicBoolean(true)
+    @Volatile private var automaticPaused = false
     @Volatile private var failure: ClientFailure? = null
     @Volatile private var view = ScanView(0, 0, true, false, false, options.mode == TraversalMode.RESERVOIR)
     @Volatile private var generation: Long? = null
     @Volatile private var closed = false
+    override val indexStatus get() = view.let { v -> IndexStatus(v.count, v.seen, v.scanning, v.refreshing,
+        v.scannedCount, v.scannedSeen, v.directories, v.updatedAt, v.reused, v.limited, v.message, automaticPaused) }
+    override fun requestRefresh(): RefreshRequest {
+        if (closed || !started || failure != null) return RefreshRequest.UNAVAILABLE
+        if (!busy.compareAndSet(false, true)) return RefreshRequest.BUSY
+        if (!refreshRequests.trySend(Unit).isSuccess) { busy.set(false); return RefreshRequest.UNAVAILABLE }
+        return RefreshRequest.STARTED
+    }
     override val warning get() = view.limited?.let { "$it；继续轮播 ${view.count} 个候选，未确认全部范围" }
     override val description get(): String {
         val v = view
@@ -271,7 +288,7 @@ class ShuffleTraversal(private val root: String, private val repository: FileRep
             v.refreshing -> " · 正在前台重扫，先播旧快照"
             v.limited != null -> "（${v.limited}；未覆盖全部范围）"
             v.scanning -> "（扫描中，仅已读范围）"
-            v.reused -> "（复用 6 小时内快照，变化可手动重扫）"
+            v.reused -> "（复用快照）"
             else -> "（扫描完成）"
         }
     }
@@ -288,54 +305,113 @@ class ShuffleTraversal(private val root: String, private val repository: FileRep
             if (closed) { generation?.let(repository.catalog::cancelScan); throw CancellationException("Closed traversal") }
             val lease = checkNotNull(generation)
             started = true
-            if (view.scanning) scope.launch {
-                var limit: String? = null
-                try {
-                    while (true) {
-                        ensureActive()
-                        val path = repository.catalog.nextDirectory(lease) ?: break
-                        try {
-                            repository.scanPages(path) { page ->
-                                ensureActive()
-                                val reached = repository.catalog.appendScan(lease, repository.session.site.id, root, page.entries, options)
-                                view = repository.catalog.scanView(lease)
-                                if (reached) throw IndexBudgetReached("达到 10 万条索引预算")
-                                delay(10)
-                            }
-                        } catch (e: ClientFailure) { if (e.kind != FailureKind.ACCESS) throw e }
-                        repository.catalog.markDirectory(lease, path)
-                    }
-                } catch (e: CancellationException) { throw e }
-                catch (e: IndexBudgetReached) { limit = e.message }
-                catch (e: Exception) { failure = scanFailure(e) }
-                try {
-                    if (failure == null) repository.catalog.finishScan(lease, limit, clock()) else repository.catalog.failedScan(lease)
-                    view = repository.catalog.scanView(lease)
-                } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { failure = scanFailure(e) }
-            }
+            scope.launch { coordinateRefresh(lease) }
         }
         while (true) {
             currentCoroutineContext().ensureActive()
             failure?.let { throw it }
             // Keep a selected/round-marked item across prompt cancellation at the IO boundary.
-            withContext(Dispatchers.IO) {
-                reservedPick = repository.catalog.pickScanned(checkNotNull(generation))
-                view = repository.catalog.scanView(checkNotNull(generation))
+            val observed = withContext(Dispatchers.IO) {
+                synchronized(repository.catalog) {
+                    reservedPick = repository.catalog.pickScanned(checkNotNull(generation))
+                    updateView(checkNotNull(generation))
+                }
             }
             if (closed) throw CancellationException("Closed traversal")
             failure?.let { throw it }
             reservedPick?.let { reservedPick = null; return it }
-            if (!view.scanning) {
-                view.limited?.let { throw ClientFailure(FailureKind.CAPACITY, "$it，尚未发现可播放资源；请选择更具体的目录") }
+            if (!observed.scanning) {
+                observed.limited?.let { throw ClientFailure(FailureKind.CAPACITY, "$it，尚未发现可播放资源；请选择更具体的目录") }
                 return null
             }
             delay(50)
         }
     }
+    private fun updateView(lease: Long): ScanView = synchronized(repository.catalog) {
+        repository.catalog.scanView(lease).also { view = it }
+    }
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private suspend fun coordinateRefresh(lease: Long) {
+        var firstWait = !view.scanning
+        if (view.scanning) scan(lease, view.refreshing)
+        busy.set(false)
+        if (failure != null) return
+        while (currentCoroutineContext().isActive) {
+            // One cancellable monotonic delay, never a background service or frequent poll.
+            val interval = refreshIntervalMillis.takeIf { it > 0 && !automaticPaused }
+            val wait = if (firstWait && interval != null) {
+                val age = view.updatedAt?.let { (clock() - it).coerceAtLeast(0) } ?: 0
+                (interval - age).coerceAtLeast(1)
+            } else interval
+            firstWait = false
+            val manual = if (wait == null) { refreshRequests.receive(); true }
+                else select { refreshRequests.onReceive { true }; onTimeout(wait) { false } }
+            // A click racing the timeout owns the same single slot: consume its signal,
+            // never launch a second scan or leave a redundant queued refresh behind.
+            if (!manual && !busy.compareAndSet(false, true)) refreshRequests.receive()
+            automaticPaused = false
+            try {
+                if (repository.catalog.refreshScan(lease)) {
+                    updateView(lease)
+                    scan(lease, true)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { refreshFailed(lease, scanFailure(e)) }
+            finally { busy.set(false) }
+        }
+    }
+    private suspend fun scan(lease: Long, refreshing: Boolean) {
+        var limit: String? = null
+        var problem: ClientFailure? = null
+        try {
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val path = repository.catalog.nextDirectory(lease) ?: break
+                try {
+                    repository.scanPages(path) { page ->
+                        currentCoroutineContext().ensureActive()
+                        val reached = repository.catalog.appendScan(lease, repository.session.site.id, root, page.entries, options)
+                        updateView(lease)
+                        if (reached) throw IndexBudgetReached("达到候选或目录数量预算")
+                        delay(if (refreshing) 40 else 10)
+                    }
+                } catch (e: ClientFailure) {
+                    // A denied root is not an authoritative empty library. During refresh,
+                    // inaccessible subtrees also prevent replacing a useful old snapshot.
+                    if (e.kind != FailureKind.ACCESS || refreshing || path == root) throw e
+                }
+                repository.catalog.markDirectory(lease, path)
+                updateView(lease)
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (e: IndexBudgetReached) { limit = e.message }
+        catch (e: Exception) { problem = scanFailure(e) }
+        try {
+            if (problem == null) repository.catalog.finishScan(lease, limit, clock())
+            else if (refreshing) { refreshFailed(lease, problem); return }
+            else { failure = problem; repository.catalog.failedScan(lease) }
+            updateView(lease)
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            if (refreshing) refreshFailed(lease, scanFailure(e)) else failure = scanFailure(e)
+        }
+    }
+    private fun refreshFailed(lease: Long, error: ClientFailure) {
+        automaticPaused = error.kind in setOf(FailureKind.AUTH, FailureKind.ACCESS, FailureKind.CHALLENGE, FailureKind.RATE_LIMIT, FailureKind.CAPACITY)
+        val reason = when (error.kind) {
+            FailureKind.AUTH, FailureKind.ACCESS, FailureKind.CHALLENGE -> "鉴权或目录权限异常"
+            FailureKind.RATE_LIMIT -> "服务器限流"
+            FailureKind.NETWORK -> "网络异常"
+            FailureKind.CAPACITY -> "本机索引存储异常"
+            else -> "目录变化、响应异常或索引预算不足"
+        }
+        // No raw server text/URLs; failure of an optional refresh is not playback failure.
+        repository.catalog.failedScan(lease, "刷新失败：$reason；保留旧索引")
+        updateView(lease)
+    }
     private fun scanFailure(e: Exception) = e as? ClientFailure ?: when (e) {
         is SQLiteFullException, is SQLiteDiskIOException -> ClientFailure(FailureKind.CAPACITY, "本机索引读写失败，请检查存储空间", e)
         else -> ClientFailure(FailureKind.SERVER, "目录扫描失败，请重新加载后重试", e)
     }
-    override fun close() { closed = true; scope.cancel(); generation?.let(repository.catalog::cancelScan) }
+    override fun close() { closed = true; scope.cancel(); refreshRequests.cancel(); generation?.let(repository.catalog::cancelScan) }
 }

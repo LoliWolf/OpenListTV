@@ -2,7 +2,7 @@
 
 轻量原生 Android 客户端，为电视、投影和遥控器设计。
 
-[下载 1.0.0 APK](https://github.com/LoliWolf/OpenListTV/releases/tag/v1.0.0) · [使用说明](docs/USAGE.md) · [飞书知识库](https://my.feishu.cn/wiki/LojHwxGlOiAofDk2JLocRIYinnb)
+[稳定版 1.0.0](https://github.com/LoliWolf/OpenListTV/releases/tag/v1.0.0) · [预览版 1.0.1-preview.11](https://github.com/LoliWolf/OpenListTV/releases/tag/v1.0.1-preview.11) · [使用说明](docs/USAGE.md) · [飞书知识库](https://my.feishu.cn/wiki/LojHwxGlOiAofDk2JLocRIYinnb)
 
 ## 功能
 
@@ -14,17 +14,19 @@
 
 Android 6.0+；1.0.0 支持按设备能力播放 4K SDR，不做本地视频转码。更新请直接覆盖安装，不要先卸载。
 
+1.0.1 预览版新增简洁界面、HDR 链路、大目录索引复用、公平抽样和前台自动刷新；详见[预览版说明](docs/PREVIEW_1.0.1.md)。
+
 ## 截图
 
-实际 Release 应用截图；演示资源由本地程序生成，不包含私人文件。
+以下为 1.0.1-preview.11 的实际签名 Release 应用截图；演示资源由本地程序生成，不包含私人文件。稳定版界面见[使用说明](docs/USAGE.md)。
 
 <p>
-  <img src="docs/screenshots/landscape-browser.png" width="48%" alt="横屏资源浏览与缩略图">
-  <img src="docs/screenshots/landscape-slideshow.png" width="48%" alt="横屏图片轮播">
+  <img src="docs/screenshots/preview11/landscape-browser.png" width="48%" alt="预览版横屏资源浏览与缩略图">
+  <img src="docs/screenshots/preview11/landscape-player.png" width="48%" alt="预览版横屏图片轮播与精简控制条">
 </p>
 <p>
-  <img src="docs/screenshots/portrait-browser.png" width="280" alt="竖屏资源浏览">
-  <img src="docs/screenshots/portrait-slideshow-settings.png" width="280" alt="竖屏轮播设置">
+  <img src="docs/screenshots/preview11/portrait-browser.png" width="280" alt="预览版竖屏资源浏览">
+  <img src="docs/screenshots/preview11/portrait-setup.png" width="280" alt="预览版竖屏分层轮播设置">
 </p>
 
 ## 开发

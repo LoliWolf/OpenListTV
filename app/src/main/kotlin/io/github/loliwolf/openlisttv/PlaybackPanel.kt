@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.view.*
 import android.widget.*
@@ -43,15 +44,23 @@ class PlaybackPanel(
     private val imageView = ImageView(activity).apply { scaleType = ImageView.ScaleType.MATRIX }
     private val playerView = PlayerView(activity).apply { useController = false; setKeepContentOnPlayerReset(false) }
     private val center = TvUi.text(activity, "正在加载…", 22f, Color.WHITE).apply { gravity = Gravity.CENTER; setPadding(dp(40), dp(20), dp(40), dp(20)) }
-    private val controls = TvUi.column(activity).apply { setBackgroundColor(Color.argb(235, 14, 26, 41)); setPadding(dp(28), dp(16), dp(28), dp(16)) }
+    private val controls = TvUi.column(activity).apply {
+        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x880B1711.toInt(), 0xED0B1711.toInt(), 0xFA0B1711.toInt()))
+        setPadding(dp(20), dp(28), dp(20), dp(16))
+    }
     private val title = TvUi.text(activity, "", 19f, Color.WHITE).also(TvUi::ellipsis)
-    private val status = TvUi.text(activity, "", 14f, 0xFFC3C6CF.toInt())
-    private val progress = TvUi.text(activity, "", 14f, 0xFFA2C9FF.toInt())
-    private val pause = TvUi.button(activity, "暂停", dark = true) { togglePause() }
+    private val status = TvUi.text(activity, "", 12f, 0xFFBECBC0.toInt()).also(TvUi::ellipsis)
+    private val progress = TvUi.text(activity, "", 13f, 0xFFC5E7D0.toInt())
+    private val indexLine = TvUi.text(activity, "", 11f, 0xFFA4BDAA.toInt()).apply { visibility = GONE }.also(TvUi::ellipsis)
+    private var indexDetails: TextView? = null
+    private var indexDialog: AlertDialog? = null
+    private var indexStatusJob: Job? = null
+    private var indexFeedback: Pair<Long, String>? = null
+    private val indexedMode = options?.mode in listOf(TraversalMode.SHUFFLE, TraversalMode.RESERVOIR)
+    private val pause = TvUi.button(activity, "暂停", dark = true, primary = true) { togglePause() }
     private var engine: MediaEngine? = null
     private var bitmap: Bitmap? = null
     private var source: TraversalSource? = null
-    private var traversalWarning: String? = null
     private var forceScanUsed = false
     private val history = PlaybackHistory()
     private var loadJob: Job? = null
@@ -85,10 +94,10 @@ class PlaybackPanel(
     private var lastPanTime = 0L
     private val displayPrefs = activity.getSharedPreferences("playback.display", Context.MODE_PRIVATE)
     private var videoFraming = runCatching { VideoFraming.valueOf(displayPrefs.getString("video.framing", "FIT")!!) }.getOrDefault(VideoFraming.FIT)
-    private val pictureHelp = TvUi.text(activity, "", 16f, Color.WHITE).apply { gravity = Gravity.CENTER; setBackgroundColor(0xD9142233.toInt()); setPadding(dp(16),dp(12),dp(16),dp(12)); visibility = GONE }
+    private val pictureHelp = TvUi.text(activity, "", 16f, Color.WHITE).apply { gravity = Gravity.CENTER; setBackgroundColor(0xE013261B.toInt()); setPadding(dp(16),dp(12),dp(16),dp(12)); visibility = GONE }
     private val seekLabel = TvUi.text(activity, "", 19f, Color.WHITE)
     private val seekBar = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 1000 }
-    private val seekHud = TvUi.column(activity).apply { setBackgroundColor(0xEF142233.toInt()); setPadding(dp(24),dp(16),dp(24),dp(16)); addView(seekLabel); addView(seekBar); visibility = GONE }
+    private val seekHud = TvUi.column(activity).apply { setBackgroundColor(0xEF14271D.toInt()); setPadding(dp(24),dp(16),dp(24),dp(16)); addView(seekLabel); addView(seekBar); visibility = GONE }
     private val seek = RemoteSeekController(scope, {
         engine?.player?.let { p -> object : RemoteSeekController.Port {
             override val position get() = p.currentPosition
@@ -111,26 +120,45 @@ class PlaybackPanel(
         contentDescription = "播放画面：确认暂停，方向键控制，返回退出"
         setBackgroundColor(Color.BLACK)
         addView(playerView, LayoutParams(-1, -1)); addView(imageView, LayoutParams(-1, -1)); addView(center, LayoutParams(-1, -1))
-        controls.addView(title); controls.addView(status); controls.addView(progress)
-        val row = ActionFlow(activity)
+        controls.addView(title); controls.addView(status); controls.addView(progress); controls.addView(indexLine)
+        val row = ActionFlow(activity).apply { setPadding(0, dp(12), 0, 0) }
         row.addView(TvUi.button(activity, "上一项", dark = true) { advance(-1) }); row.addView(pause)
         row.addView(TvUi.button(activity, "下一项", dark = true) { advance(1) })
-        row.addView(TvUi.button(activity, "音轨 / 字幕", dark = true) { tracks() })
-        row.addView(TvUi.button(activity, "播放信息", dark = true) { information() })
-        row.addView(TvUi.button(activity, "画面设置", dark = true) { pictureSettings() })
-        if (options != null) row.addView(TvUi.button(activity, "定时停止", dark = true) { stopDialog() })
-        row.addView(TvUi.button(activity, "重试", dark = true) {
-            if (stopIfExpired()) return@button
-            failures = 0; expiredRetries = 0; suspended = false
-            if (options != null && source == null) source = createSource()
-            (pendingEntry ?: current)?.let { launchPlay(it) } ?: advance(1)
-        })
-        row.addView(TvUi.button(activity, "退出", dark = true) { onExit() }); controls.addView(row)
+        row.addView(TvUi.button(activity, "更多", dark = true) { playbackMenu() })
+        controls.addView(row)
         addView(controls, LayoutParams(-1, -2, Gravity.BOTTOM))
         addView(pictureHelp, LayoutParams(-1, -2, Gravity.BOTTOM))
         addView(seekHud, LayoutParams(-1, -2, Gravity.BOTTOM))
         imageView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> applyPicture() }
         showControls()
+    }
+    private fun playbackMenu() {
+        val actions = mutableListOf(
+            UiPanels.Action("画面设置", "视频比例 / 图片缩放与旋转") { pictureSettings() },
+            UiPanels.Action("播放信息", "按需查看当前资源信息") { information() },
+        )
+        if (current?.kind in listOf(MediaKind.VIDEO, MediaKind.AUDIO))
+            actions += UiPanels.Action("音轨 / 字幕") { tracks() }
+        if (options != null) actions += UiPanels.Action("定时停止", "调整本次轮播的停止时间") { stopDialog() }
+        if (indexedMode) {
+            actions += UiPanels.Action("索引状态", "候选数量、更新时间与刷新详情") { indexInformation() }
+            actions += UiPanels.Action("刷新索引", "不打断播放；也可直接按菜单键") { refreshIndex() }
+        }
+        actions += UiPanels.Action("重试", "重新打开当前资源") {
+            if (!stopIfExpired()) {
+                failures = 0; expiredRetries = 0; suspended = false
+                if (options != null && source == null) source = createSource()
+                (pendingEntry ?: current)?.let { launchPlay(it) } ?: advance(1)
+            }
+        }
+        actions += UiPanels.Action("退出", "返回资源库") { onExit() }
+        presentDialog(UiPanels.menu(activity, "播放选项", actions))
+    }
+    private fun indexInformation() {
+        val text = TvUi.text(activity, "", 15f).apply { setPadding(dp(20), dp(8), dp(20), dp(12)) }
+        val dialog = AlertDialog.Builder(activity).setTitle("索引状态").setView(UiPanels.scroll(activity, text)).setPositiveButton("关闭", null).create()
+        indexDetails = text; indexDialog = dialog
+        presentDialog(dialog); updateIndexStatus()
     }
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w,h,oldw,oldh)
@@ -254,8 +282,12 @@ class PlaybackPanel(
     private fun presentDialog(dialog: AlertDialog) {
         seek.cancel()
         activeDialog?.dismiss(); activeDialog = dialog; hideJob?.cancel()
-        dialog.setOnDismissListener { if (activeDialog === dialog) activeDialog = null; if (!disposed && !suspended && !imagePan) showControls() }
-        dialog.show()
+        dialog.setOnDismissListener {
+            if (activeDialog === dialog) activeDialog = null
+            if (indexDialog === dialog) { indexDetails = null; indexDialog = null }
+            if (!disposed && !suspended && !imagePan) showControls()
+        }
+        UiPanels.show(dialog)
     }
     private fun launchPlay(entry: Entry, resolved: MediaSource? = null) {
         autoSkip?.cancel()
@@ -324,11 +356,8 @@ class PlaybackPanel(
         if (current?.kind == MediaKind.AUDIO) center.text = "♪\n${current?.name}"
         if (first) {
             status.text = (source?.description ?: "单项点播") + if (skipped > 0) " · 已跳过 $skipped 项" else ""
-            source?.warning?.takeIf { it != traversalWarning }?.let {
-                traversalWarning = it
-                Toast.makeText(activity, it, Toast.LENGTH_LONG).show()
-                showControls()
-            }
+            // Index limits/refresh outcomes belong to the opt-in overlay, never a toast
+            // or an automatic showControls() over an immersive slideshow.
             prepareNext()
             // Automatic media changes must not steal focus or keep reopening the overlay.
             if (controls.visibility == VISIBLE && hideJob?.isActive != true) hideJob = scope.launch { delay(5000); if (!paused && ready) hideControls() }
@@ -535,9 +564,56 @@ class PlaybackPanel(
         if (disposed) return
         seek.cancel()
         controls.visibility = VISIBLE; pause.requestFocus(); hideJob?.cancel()
+        observeIndexStatus()
         hideJob = scope.launch { delay(5000); if (!paused && ready) hideControls() }
     }
-    private fun hideControls() { if (activeDialog == null) { controls.visibility = GONE; requestFocus() } }
+    private fun hideControls() { if (activeDialog == null) { controls.visibility = GONE; indexStatusJob?.cancel(); requestFocus() } }
+    private fun refreshIndex() {
+        if (!indexedMode || disposed || suspended) return
+        val request = (source as? RefreshableTraversal)?.requestRefresh() ?: RefreshRequest.UNAVAILABLE
+        indexFeedback = SystemClock.elapsedRealtime() + 1500 to when (request) {
+            RefreshRequest.STARTED -> "已请求刷新，不打断播放"
+            RefreshRequest.BUSY -> "扫描正在进行，无需重复刷新"
+            RefreshRequest.UNAVAILABLE -> "请先继续轮播，再刷新索引"
+        }
+        if (controls.visibility == VISIBLE) updateIndexStatus()
+        // Menu key deliberately leaves the overlay hidden and never pauses or seeks.
+    }
+    private fun observeIndexStatus() {
+        indexStatusJob?.cancel()
+        if (!indexedMode) return
+        updateIndexStatus()
+        indexStatusJob = scope.launch {
+            while (isActive && controls.visibility == VISIBLE && !suspended) {
+                delay(1000); updateIndexStatus()
+            }
+        }
+    }
+    private fun updateIndexStatus() {
+        if (!indexedMode || controls.visibility != VISIBLE) return
+        val snapshot = (source as? RefreshableTraversal)?.indexStatus
+        val label = if (snapshot == null) "索引：等待继续轮播" else buildString {
+            append("索引：${snapshot.count} 个候选")
+            if (snapshot.scanning) append(" · ${if (snapshot.refreshing) "刷新中，继续旧索引" else "首次扫描中"} · 已读 ${snapshot.scannedSeen} 项 / ${snapshot.directories} 个目录")
+            else append(if (snapshot.reused) " · 复用快照" else " · 扫描已结束")
+            snapshot.updatedAt?.let { append("\n上次更新：" + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it))) }
+            append(if (options!!.autoRefreshMinutes == 0) " · 自动刷新关闭" else if (snapshot.automaticPaused) " · 自动刷新已暂停，可手动重试" else " · 自动刷新 ${options.autoRefreshMinutes} 分钟")
+            snapshot.limited?.let { append("\n$it；未覆盖全部范围") }
+            snapshot.message?.let { append("\n$it") }
+            indexFeedback?.takeIf { SystemClock.elapsedRealtime() < it.first }?.let { append("\n${it.second}") }
+            append("\n菜单键刷新 · 方向键打开控制栏查看状态")
+        }
+        indexLine.visibility = VISIBLE
+        val brief = if (snapshot == null) "索引：等待继续轮播" else buildString {
+            append("索引 · ${snapshot.count} 个候选")
+            if (snapshot.scanning) append(if (snapshot.refreshing) " · 刷新中" else " · 扫描中")
+            snapshot.message?.let { append(" · $it") }
+            indexFeedback?.takeIf { SystemClock.elapsedRealtime() < it.first }?.let { append(" · ${it.second}") }
+            snapshot.updatedAt?.let { append(" · 上次更新 " + java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(it))) }
+        }
+        if (indexLine.text.toString() != brief) indexLine.text = brief
+        indexDetails?.let { if (it.text.toString() != label) it.text = label }
+    }
     fun back(): Boolean {
         if (seek.active) { seek.cancel(); return true }
         if (imagePan) { imagePan = false; pictureHelp.visibility = GONE; showControls(); return true }
@@ -550,6 +626,10 @@ class PlaybackPanel(
         }
     }
     fun handleKey(event: KeyEvent): Boolean {
+        if (indexedMode && activeDialog == null && !imagePan && event.keyCode == KeyEvent.KEYCODE_MENU) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) refreshIndex()
+            return true // Consume up/repeats too; never open another menu or change focus.
+        }
         if (event.action == KeyEvent.ACTION_UP && seek.release(event.keyCode, event.isCanceled)) return true
         if (event.action != KeyEvent.ACTION_DOWN) return false
         if (imagePan) {

@@ -6,7 +6,9 @@ import kotlinx.coroutines.CancellationException
 import kotlin.random.Random
 
 internal data class ScanView(val count: Int, val seen: Long, val scanning: Boolean, val reused: Boolean, val refreshing: Boolean,
-    val sampling: Boolean, val limited: String? = null, val complete: Boolean = false)
+    val sampling: Boolean, val limited: String? = null, val complete: Boolean = false,
+    val updatedAt: Long? = null, val scannedCount: Int = 0, val scannedSeen: Long = 0,
+    val directories: Int = 0, val message: String? = null)
 
 /** Two fixed disk banks: the last completed snapshot and one staged refresh. Catalog owns
  * synchronization and the shared 64MiB quota. Never publish cancelled/failed partial work. */
@@ -55,7 +57,7 @@ internal class ScanIndex(private val database: () -> SQLiteDatabase, private val
         val fresh = eligible && age!! <= FRESH_MS
         playing = if (eligible) cached!!.bank else 1 - (cached?.bank?.takeIf { it in 0..1 } ?: 1)
         writing = if (fresh) null else if (eligible) 1-playing else playing
-        view = if (eligible) ScanView(cached!!.count, cached.seen, !fresh, true, !fresh, options.mode == TraversalMode.RESERVOIR, cached.limited, cached.complete)
+        view = if (eligible) ScanView(cached!!.count, cached.seen, !fresh, true, !fresh, options.mode == TraversalMode.RESERVOIR, cached.limited, cached.complete, cached.created)
             else ScanView(0, 0, true, false, false, options.mode == TraversalMode.RESERVOIR)
         sampler = if (options.mode == TraversalMode.RESERVOIR) ReservoirSampler(minOf(SAMPLE_SIZE, entryLimit)) else null
         if (!eligible || options.forceRescan) invalidate()
@@ -69,11 +71,29 @@ internal class ScanIndex(private val database: () -> SQLiteDatabase, private val
         if (eligible) playRound = minimumRound(playing) + 1
         return view
     }
+    fun refresh(lease: Long): Boolean {
+        requireLease(lease)
+        if (view.scanning) return false
+        val bank = 1 - playing
+        // Prepare first. If allocation fails, the active bank and its timestamp remain intact.
+        space(site, root, 0) { transaction {
+            database().delete(table(bank), null, null)
+            database().delete("scan_queue", null, null)
+            database().execSQL("INSERT INTO scan_queue(path,done) VALUES(?,0)", arrayOf(root))
+        } }
+        writing = bank; workingCount = 0; workingSeen = 0; queueCount = 1
+        sampler = if (options.mode == TraversalMode.RESERVOIR) ReservoirSampler(minOf(SAMPLE_SIZE, entryLimit)) else null
+        view = view.copy(scanning = true, refreshing = true, scannedCount = 0, scannedSeen = 0, directories = 0, message = null)
+        return true
+    }
     fun nextDirectory(lease: Long): String? {
         requireLease(lease)
         return database().rawQuery("SELECT path FROM scan_queue WHERE done=0 LIMIT 1", null).use { if (it.moveToFirst()) it.getString(0) else null }
     }
-    fun markDirectory(lease: Long, path: String) { requireLease(lease); database().delete("scan_queue", "path=?", arrayOf(path)) }
+    fun markDirectory(lease: Long, path: String) {
+        requireLease(lease); database().delete("scan_queue", "path=?", arrayOf(path))
+        view = view.copy(directories = view.directories + 1)
+    }
     fun append(lease: Long, entries: List<Entry>, filterOptions: SlideshowOptions = options): Boolean {
         requireLease(lease)
         val bank = writing ?: throw CancellationException("No active scan")
@@ -114,6 +134,7 @@ internal class ScanIndex(private val database: () -> SQLiteDatabase, private val
             db.compileStatement("INSERT INTO scan_queue(path,done) VALUES(?,0)").use { statement -> queued.forEach { statement.bindString(1, it.path); statement.executeInsert() } }
         } }
         workingCount = nextCount; queueCount += queued.size
+        view = view.copy(scannedCount = workingCount, scannedSeen = workingSeen)
         if (playing == bank) view = view.copy(count = workingCount, seen = workingSeen)
         return reached || queued.size < directories.size
     }
@@ -123,7 +144,7 @@ internal class ScanIndex(private val database: () -> SQLiteDatabase, private val
         if (view.refreshing && limited != null) {
             // A quota-limited rebuild must not replace a useful completed cache with a
             // smaller prefix, nor extend the old snapshot's freshness timestamp.
-            view = view.copy(scanning = false, refreshing = false, limited = "刷新受限：$limited；继续旧索引，目录变化尚未确认")
+            view = view.copy(scanning = false, refreshing = false, message = "刷新受限：$limited；继续旧索引，目录变化尚未确认")
             writing = null; return
         }
         transaction {
@@ -132,9 +153,14 @@ internal class ScanIndex(private val database: () -> SQLiteDatabase, private val
             else invalidate()
         }
         playing = bank; writing = null; playRound = 1
-        view = ScanView(workingCount, workingSeen, false, false, false, options.mode == TraversalMode.RESERVOIR, limited, limited == null)
+        view = view.copy(count = workingCount, seen = workingSeen, scanning = false, reused = false, refreshing = false,
+            limited = limited, complete = limited == null, updatedAt = now, message = null)
     }
-    fun failed(lease: Long) { requireLease(lease); view = view.copy(scanning = false, refreshing = false, complete = false) }
+    fun failed(lease: Long, message: String? = null) {
+        requireLease(lease)
+        view = view.copy(scanning = false, refreshing = false, complete = if (view.updatedAt != null) view.complete else false, message = message)
+        writing = null
+    }
     fun info(lease: Long): ScanView { requireLease(lease); return view }
     fun pick(lease: Long): Entry? {
         requireLease(lease)

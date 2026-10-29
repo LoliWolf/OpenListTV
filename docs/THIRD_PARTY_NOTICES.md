@@ -1,6 +1,6 @@
 # 第三方组件
 
-完整许可与原始 NOTICE 随 APK 打包，可在“设置 → 第三方许可”查看，也见 [许可文本](../app/src/main/assets/third-party-notices.txt)。以下为解析到的运行时 / 构建辅助依赖，R8 可能仅打包其中子集。
+完整许可与原始 NOTICE 随 APK 打包，可在第三方许可页面查看（1.0.1 预览版入口为“设置 → 关于 OpenList TV → 第三方许可”），也见 [许可文本](../app/src/main/assets/third-party-notices.txt)。以下为解析到的运行时 / 构建辅助依赖，R8 可能仅打包其中子集。
 
 - androidx.activity:activity-ktx:1.10.1 — The Apache Software License, Version 2.0
 - androidx.activity:activity:1.10.1 — The Apache Software License, Version 2.0

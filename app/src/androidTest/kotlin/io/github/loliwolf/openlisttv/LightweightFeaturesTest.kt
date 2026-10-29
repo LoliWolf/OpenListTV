@@ -276,7 +276,7 @@ class LightweightFeaturesTest {
             fun views(v: View): List<View> = listOf(v) + if (v is ViewGroup) (0 until v.childCount).flatMap { views(v.getChildAt(it)) } else emptyList()
             var text = ""
             main {
-                views(f.panel).filterIsInstance<Button>().single { it.text == "播放信息" }.performClick()
+                PlayerUiActions.click(f.panel, "播放信息")
                 val dialog = PlaybackPanel::class.java.getDeclaredField("activeDialog").apply { isAccessible = true }.get(f.panel) as AlertDialog
                 text = views(dialog.window!!.decorView).filterIsInstance<TextView>().joinToString("\n") { it.text }
             }

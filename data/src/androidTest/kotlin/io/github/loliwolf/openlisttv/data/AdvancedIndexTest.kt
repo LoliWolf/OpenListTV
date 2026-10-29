@@ -99,7 +99,7 @@ class AdvancedIndexTest {
         val stale=1_000_000L+ScanIndex.FRESH_MS+1
         var lease=c.reserveScan(); c.openScan(lease,"/folder","s","key",shuffle,stale)
         c.appendScan(lease,"s","/folder",listOf(image(999)),shuffle); c.finishScan(lease,"budget fixture",stale)
-        assertEquals(200,c.scanView(lease).count); assertNotNull(c.scanView(lease).limited)
+        assertEquals(200,c.scanView(lease).count); assertNotNull(c.scanView(lease).message)
         lease=c.reserveScan(); c.openScan(lease,"/folder","s","key",shuffle,stale+1)
         assertTrue(c.scanView(lease).scanning); c.failedScan(lease)
         lease=c.reserveScan(); c.openScan(lease,"/folder","s","key",shuffle,stale+2)

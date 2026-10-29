@@ -28,6 +28,8 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.TimeUnit
 
 @UnstableApi
@@ -45,7 +47,12 @@ class SeamlessSlideshowTest {
         val end = SystemClock.elapsedRealtime() + timeout
         while (!condition()) { if (SystemClock.elapsedRealtime() > end) fail("Timed out waiting for condition"); SystemClock.sleep(30) }
     }
-    private inner class Fixture(val delaySecond: AtomicLong = AtomicLong(0), val badSecond: Boolean = false, val rateLimited: Boolean = false, val prefetch: Boolean = true, val oversizedSecond: Boolean = false, val largeShuffle: Boolean = false, val reservoir: Boolean = false) : AutoCloseable {
+    private inner class Fixture(val delaySecond: AtomicLong = AtomicLong(0), val badSecond: Boolean = false, val rateLimited: Boolean = false, val prefetch: Boolean = true, val oversizedSecond: Boolean = false, val largeShuffle: Boolean = false, val reservoir: Boolean = false, val refreshable: Boolean = false) : AutoCloseable {
+        val listCalls = AtomicInteger()
+        val refreshDelay = AtomicLong()
+        @Volatile var refreshGate: CompletableDeferred<Unit>? = null
+        val refreshFails = AtomicBoolean()
+        val refreshedLibrary = AtomicBoolean()
         val requests = CopyOnWriteArrayList<Pair<String, Long>>()
         val frames = CopyOnWriteArrayList<Pair<String, Long>>()
         val violations = CopyOnWriteArrayList<String>()
@@ -77,6 +84,11 @@ class SeamlessSlideshowTest {
             val entries = colors.keys.map { Entry("/$it", it, false, modified = "fixture") }
             val gateway = object : FileGateway {
                 override suspend fun list(session: Session, path: String, password: String, page: Int, perPage: Int): Listing {
+                    listCalls.incrementAndGet()
+                    refreshGate?.await()
+                    delay(refreshDelay.get())
+                    if (refreshFails.get()) throw ClientFailure(FailureKind.RATE_LIMIT, "fixture rate limit")
+                    if (refreshedLibrary.get()) return Listing(entries.takeLast(1), 1)
                     if (!largeShuffle) return Listing(entries, entries.size)
                     delay(40)
                     val start = (page - 1) * perPage
@@ -88,7 +100,7 @@ class SeamlessSlideshowTest {
             activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
             var created: PlaybackPanel? = null
             onMain {
-                created = PlaybackPanel(activity, repository, catalog, "/", SortOrder(), SlideshowOptions(mode = if (reservoir) TraversalMode.RESERVOIR else if (largeShuffle) TraversalMode.SHUFFLE else TraversalMode.ORDERED, recursive = false, imageOnly = true, imageSeconds = 1, prefetch = prefetch), scope, {}, { null })
+                created = PlaybackPanel(activity, repository, catalog, "/", SortOrder(), SlideshowOptions(mode = if (reservoir) TraversalMode.RESERVOIR else if (largeShuffle || refreshable) TraversalMode.SHUFFLE else TraversalMode.ORDERED, recursive = false, imageOnly = true, imageSeconds = 1, prefetch = prefetch), scope, {}, { null })
                 activity.setContentView(created!!)
             }
             panel = created!!; photo = panel.getChildAt(1) as ImageView; center = panel.getChildAt(2) as TextView
@@ -110,7 +122,7 @@ class SeamlessSlideshowTest {
                 }.also { panel.viewTreeObserver.addOnDrawListener(it) }
                 panel.start(null)
             }
-            if (largeShuffle) eventually { displayed().startsWith("图片 ") } else waitImage("1.png")
+            if (largeShuffle || refreshable) eventually { displayed().startsWith("图片 ") } else waitImage("1.png")
         }
         fun displayed(): String { var result = ""; onMain { result = photo.contentDescription?.toString().orEmpty() }; return result }
         fun waitImage(name: String) = eventually { displayed() == "图片 $name" }
@@ -141,6 +153,54 @@ class SeamlessSlideshowTest {
             onMain { drawListener?.let { panel.viewTreeObserver.removeOnDrawListener(it) }; panel.dispose(); activity.finish() }
             runBlocking { scope.coroutineContext[Job]!!.cancelAndJoin() }
             server.shutdown(); catalog.close(); context.deleteDatabase(name)
+        }
+    }
+    @Test fun menuRefreshDoesNotShowOverlayOrInterruptFramesAndCoalescesHeldKey() {
+        Fixture(refreshable = true).use { f ->
+            val controls = f.panel.getChildAt(3)
+            eventually {
+                var complete = false
+                onMain { complete = ((controls as ViewGroup).getChildAt(3) as TextView).text.contains("上次更新") }
+                complete
+            }
+            onMain { f.panel.back() }
+            f.refreshGate = CompletableDeferred(); f.refreshedLibrary.set(true)
+            val frames = f.frames.size
+            f.press(KeyEvent.KEYCODE_MENU)
+            onMain {
+                repeat(15) { repeat -> f.panel.handleKey(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MENU, repeat + 1)) }
+                f.panel.handleKey(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MENU))
+            }
+            eventually { f.listCalls.get() == 2 }
+            // Scanning is explicitly blocked. Random initial picks may repeat, so wait
+            // for an actual different rendered image, not an arbitrary 1.8s deadline.
+            eventually(5000) { f.frames.size > frames }
+            onMain { assertEquals(View.GONE, controls.visibility); assertEquals(View.GONE, f.center.visibility) }
+            f.checkScreenPixels()
+            f.refreshGate!!.complete(Unit)
+            eventually { f.catalog.scannedCount() == 1 }
+            f.waitImage("3.png"); SystemClock.sleep(2200)
+            assertEquals("图片 3.png", f.displayed()); assertEquals(2, f.listCalls.get())
+            onMain { assertEquals(View.GONE, controls.visibility) }
+            assertTrue(f.violations.toString(), f.violations.isEmpty())
+        }
+    }
+    @Test fun refreshFailureIsSilentAndStatusOnlyAppearsWhenRequested() {
+        Fixture(refreshable = true).use { f ->
+            val controls = f.panel.getChildAt(3)
+            onMain { f.panel.back() }
+            f.refreshFails.set(true); f.press(KeyEvent.KEYCODE_MENU)
+            eventually { f.listCalls.get() == 2 }
+            val before = f.frames.size; eventually(5000) { f.frames.size > before }
+            onMain { assertEquals(View.GONE, controls.visibility); assertEquals(View.GONE, f.center.visibility) }
+            f.press(KeyEvent.KEYCODE_DPAD_DOWN)
+            onMain {
+                assertEquals(View.VISIBLE, controls.visibility)
+                val line = (controls as ViewGroup).getChildAt(3) as TextView
+                assertTrue(line.text.toString(), line.text.contains("刷新失败：服务器限流"))
+                assertTrue(line.text.contains("上次更新"))
+            }
+            assertTrue(f.violations.toString(), f.violations.isEmpty())
         }
     }
     @Test fun slowPreloadStartsEarlyAndKeepsRenderedImageUntilAtomicSwap() {

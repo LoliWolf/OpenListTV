@@ -71,12 +71,13 @@ class BrowserList(
 
     init {
         orientation = VERTICAL
+        columns.visibility = GONE
         columns.addView(nameColumn, LayoutParams(0, -2, 1f))
         columns.addView(sizeColumn, LayoutParams(activity.dp(90), -2))
         addView(columns)
         adapter.setHasStableIds(true); list.adapter = adapter
         list.addItemDecoration(object : RecyclerView.ItemDecoration() {
-            private val line = Paint().apply { color = if (TvUi.night) 0xFF31363D.toInt() else 0xFFEAF0F6.toInt(); strokeWidth = 1f }
+            private val line = Paint().apply { color = if (TvUi.night) 0xFF2D3E33.toInt() else 0xFFEBEFE7.toInt(); strokeWidth = 1f }
             override fun onDraw(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
                 for (i in 0 until parent.childCount) { val child = parent.getChildAt(i); c.drawLine(activity.dp(if (compact) 80 else 100).toFloat(), child.bottom.toFloat(), (parent.width - activity.dp(20)).toFloat(), child.bottom.toFloat(), line) }
             }
@@ -139,7 +140,7 @@ class BrowserList(
     private fun updateFooter() {
         previous.isEnabled = window.current > 0; next.isEnabled = window.next != null
         val pageCount = ((total + Budgets.PAGE - 1) / Budgets.PAGE).coerceAtLeast(1)
-        summary.text = if (compact) "第 ${window.current + 1} 页 / 共 $pageCount 页" else "第 ${window.current + 1} 页 / 共 $pageCount 页 · 上下浏览，左右翻页 · 当前＋下一页预览"
+        summary.text = if (compact) "第 ${window.current + 1} 页 / 共 $pageCount 页" else "第 ${window.current + 1} 页 / 共 $pageCount 页  ·  左右翻页，长按确认查看操作"
     }
     fun updateCompactLayout() {
         compact = resources.configuration.screenWidthDp < 600
@@ -197,7 +198,7 @@ class BrowserList(
             val image = ImageView(activity).apply { scaleType = ImageView.ScaleType.CENTER_CROP; background = TvUi.shape(TvUi.tint, activity.dp(8).toFloat()); clipToOutline = true }
             row.addView(image, LayoutParams(activity.dp(64), activity.dp(44)).apply { marginEnd = activity.dp(18) })
             val column = TvUi.column(activity)
-            val name = TvUi.text(activity, "", 18f).also(TvUi::ellipsis)
+            val name = TvUi.text(activity, "", 17f).also(TvUi::ellipsis)
             val time = TvUi.text(activity, "", 12f, TvUi.muted).also(TvUi::ellipsis)
             column.addView(name); column.addView(time); row.addView(column, LayoutParams(0, -2, 1f))
             val size = TvUi.text(activity, "", 13f, TvUi.muted).apply { gravity = Gravity.END }

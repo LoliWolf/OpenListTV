@@ -6,7 +6,7 @@
 
 - 名称 OpenList TV，原生 Android OpenList 客户端，优先电视、投影、遥控器，也支持真实横竖屏与触控。
 - 当前版本 `1.0.0`，versionCode `4`，发布仓库 `https://github.com/LoliWolf/OpenListTV`，稳定 Release 标签 `v1.0.0`。
-- 当前开发分支 `dev/1.0.1`，已公开预发布 `1.0.1-preview.7` / versionCode `11`；本地迭代 `1.0.1-preview.9` / versionCode `13`，加入索引快照复用、游标分页和可选公平抽样。用户的 preview.7 发布授权不延伸到之后版本：本轮只本地交付，不推送/建标签/发布。公开 preview.7 为 prerelease、非 Latest，稳定版仍为 v1.0.0。旧 APK/标签不覆盖，后续 versionCode 继续递增。
+- 当前开发分支 `dev/1.0.1`，本轮预发布 `1.0.1-preview.11` / versionCode `15`，标签 `v1.0.1-preview.11`，重整原生界面并包含大目录索引、快照复用、公平抽样和沉浸式刷新。用户于 2026-10-30 明确授权提交、推送并发布此版本为 prerelease、非 Latest；稳定版仍为 v1.0.0。该授权不自动延伸到后续版本，不覆盖旧 APK/标签，后续 versionCode 继续递增。
 - 仓库已公开，v1.0.0 已发布为非 draft / 非 prerelease / Latest；发布源提交 ed452bffd4052d34948673e26d3e2c4e0c1e7d91 的 GitHub 构建检查通过。后续只改文档不重发 APK，不移动已发布标签或覆盖旧 Release 附件。
 - 包名固定 `io.github.loliwolf.openlisttv`。正式 APK 由 `release` 构建，非 debuggable、开启 R8 与资源裁剪；不能把 debug APK 当正式包。
 - 负责人于 2026-09-07 确认 1.0.0 已实测验收。公开文档保持产品功能与必要限制，不列待验证清单；历史工程记录保存在本机忽略的 artifacts/engineering-history 中，不编造额外测试结论。
@@ -113,6 +113,27 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 全库只保留一个按当前排序匹配的browse_seek自适应索引，不为所有组合各建索引。索引创建遇软件磁盘限额保留旧索引、继续正确查询；API23旧SQLite不支持NULL表达式索引时回退正确但可能较慢的查询。新索引占用仍计入64MiB预算，不能把SQL微基准倍数当成整页或整机加速。
 - 测试：core/ReservoirSamplerTest固定种子均匀性/百万项槽位边界；data/AdvancedIndexTest覆盖全部排序、游标跳转/失效、v3迁移、6/24小时/强制/身份隔离、重开后续轮、缓存前台刷新原子切换/失败不续期、百万候选输入及源级免API重扫。SeamlessSlideshowTest增加抽样池替换期间实际像素/帧连续回归。tools/advanced-index-ui-smoke.mjs验证遥控选项、覆盖升级保留与二次启动免列表请求。
 
+### preview.10 沉浸式索引刷新
+
+- 用户明确要求四项：可配置自动刷新、刷新不中断播放、遥控器一键刷新、显示索引状态。仅 SHUFFLE / RESERVOIR 使用整树候选索引；不改变 ORDERED / WALK 的规则。新增 `sites/slide.autoRefreshMinutes`，默认 0 关闭，合法范围 0 或 5–1440 分钟；旧偏好、包名、签名、数据库版本不变。
+- `RefreshableTraversal` 提供非阻塞单次刷新请求和内存状态快照；ShuffleTraversal 用单个协调协程、容量1的 Channel 和单次占用标志合并手动/自动并发请求，不排队连续重扫。初次扫描中不额外刷新。一次结束后延迟配置间隔，暖启动按快照年龄决定是否提前刷新；使用协程单调延迟，无频繁计时轮询、Service 或 WorkManager。
+- `ScanIndex.refresh` 在同一租约的另一候选区构建，保持当前 playing 池、轮次、时间戳。成功完成后原子发布；已显示 Bitmap、OneAhead、reservedNext、播放历史不被刷新取消。新池重新计轮，跨刷新可重复。空的成功扫描可发布，当前/已预取项后无更多资源。预算截断、网络/权限失败保留旧池，不续期；刷新中的 ACCESS 不当作空树成功。所有候选区仍共享64MiB。
+- 可选刷新错误不作为取下一项的 fatal failure；索引状态显示固定脱敏原因。鉴权/ACCESS/CHALLENGE/限流/实际存储故障暂停自动刷新，手动重试可恢复；普通网络/服务端失败按配置间隔重试。首次扫描和实际媒体失败沿用原暂停策略，绝不绕过 fs/get 鉴权。后台/退出关闭 scope 和租约；前台暂停可继续刷新。
+- 菜单键 DOWN 首次触发，重复 DOWN 和 UP 消费但不重触发；不改左右/确认/图片移动路由。无菜单键可通过控制栏“刷新索引”。没有自动 Toast、完成提示或强制弹出控制栏；初次扫描限额也只在控制栏提示。状态仅在控制栏可见时每秒读取内存值，隐藏时取消，不启动数据库/UI后台轮询。
+- 状态含候选数、已读可播数、已完成目录数、上次成功更新时间及失败原因，不编造整库总量或百分比。API仍不使用强制服务端refresh，不绕过OpenList缓存；用户新增文件可见时间受服务端缓存与扫描用时影响。
+- 测试入口：core/IndexRefreshOptionsTest，data/IndexRefreshTest（手动/自动/复用/取消/单次合并/失败不续期/空池/反复换区/偏好），SeamlessSlideshowTest 增加真实画面与隐藏控制栏刷新回归，tools/index-refresh-ui-smoke.mjs验证遥控及签名覆盖保留。退出时cancel请求Channel而非普通close，避免等待竞态变成未处理的ClosedReceive异常。实际执行结果记录在本机忽略的 artifacts/engineering-history，不把模拟器结论冒充极米实测。
+
+### preview.11 原生界面与渐进式配置
+
+- 不添加 UI 框架、图片/字体依赖或后台任务。`TvUi` 统一矿物绿/暖灰、明暗主题、44dp以上按钮和显式焦点；`UiPanels` 提供摘要操作行、分层菜单、宽度受限面板与横竖屏自适应标题栏。AlertDialog原生标题/按钮文字颜色须显式设置，不能依赖部分TV系统不可靠的默认主题。无模糊、阴影动画或海报网格。
+- 资源页只有上一级、搜索、轮播、更多；宽屏标题与工具栏并排，窄屏纵排。排序/重新加载/根目录/站点/下载/设置从“更多”进入。缩略图、虚拟列表、长按确认菜单和左右翻页逻辑不变，不扩大当前＋下一页窗口。
+- `SlideshowSetup` 拥有不可变 SlideshowOptions 草稿，概览不摆数字输入墙；模式、时长、定时及索引高级参数分层编辑。子面板应用只改草稿，取消不改草稿；主面板“开始”才写入原SiteStore偏好。forceRescan仍一次性。不得把打开设置或点击“应用”变成提前保存到下次。
+- 播放控制条只保留上一项/暂停继续/下一项/更多。画面、信息、音轨字幕、定时、刷新、重试与退出在播放选项。索引控制条显示单行摘要，完整状态按需打开，仍只在控制栏可见时读取内存快照。菜单键直接刷新不弹出UI，原长按快进/图片移动/返回规则不变。
+- 设置分为应用更新、本机下载、站点与账号、存储与缓存、关于。更新偏好名称不变；UpdateController.addSettings仍提供三个原生Switch，不改代理/下载安装协议。清缓存和退出账号有确认，不删除本机下载。
+- `UiPanels` 用弱引用登记已打开面板，仅在onConfigurationChanged时重设宽度，不轮询；登记表不保存Activity强引用。面板绑定ownerActivity，MainActivity.onDestroy只关闭本Activity的面板，避免取消/销毁遗留窗口；不能误关新Activity的面板。旋转时保留已编辑草稿和播放状态。
+- Manifest还处理screenLayout/smallestScreenSize，避免窗口在TV/窄屏尺寸分类间变化时重建Activity丢播放；纯View布局在onConfigurationChanged/onSizeChanged重排，无需换解码器或重载位图。按钮同时设置TextView.minWidth与View.minimumWidth，不能只改后者，否则系统TV主题的88dp最小宽度仍会把窄屏工具栏挤换行。
+- `tools/modern-ui-smoke.mjs` 是新层级的主遥控/横竖屏回归入口（--player-only可独立复查播放及尺寸切换），modern-upgrade-smoke验证签名覆盖保留，capture-modern-showcase生成真实明暗/横竖截图；`tools/ui-smoke.mjs` 更新了播放器更多菜单路径。部分旧专项UI脚本依赖pre.11平铺控件，不能直接以其找不到旧控件判定产品回归，按本轮层级调整后再使用；低层instrumentation继续有效。SlideshowSetupTest覆盖全部模式、数字校验、分层取消及窗口销毁，PlayerUiActions让原播放器测试走真实更多菜单。真实截图写入忽略的artifacts/modern-ui，不覆盖稳定版README截图。
+
 ## 构建与本机工具
 
 - JDK 17，Android SDK 36 / Build Tools 36.0.0，Gradle Wrapper 9.6.0，AGP 9.4.0，Kotlin 插件 2.2.10。实际 Kotlin stdlib 由依赖解析到 2.2.21；不要混淆插件与运行库版本。
@@ -140,6 +161,7 @@ app 依赖 core/data/media；data 与 media 只依赖 core，不互相依赖。C
 - 点击“更新”后 UpdatePackages 前台串行下载，暂停资源传输/列表缩略图，不与播放并行；离开前台取消并等待 IO 退出。64 KiB 缓冲、APK 上限 64 MiB、磁盘余量 64 MiB，目录私有 `files/updates/staging` / `ready`，不混入用户下载。完整长度、可用的 GitHub SHA-256、ZIP 元数据预算、包名/版本/更高 versionCode、非 debuggable 及固定签名信息均须检查；系统安装器再做实际 APK 签名验证和用户确认。损坏缓存不复用，取消不成为 ready。
 - 新增 REQUEST_INSTALL_PACKAGES 是用户本轮指定更新流程的必要权限，不是静默安装授权。Android 8+ 未授权时引导“允许此来源”，返回后继续安装；已授权则下载完成直接请求系统安装器。使用不可导出的 FileProvider，只共享 updates/ready 子目录，content:// + 临时只读授权，显式选系统安装处理程序；不暴露站点/会话/其他私有文件。保留包名和证书，不建议卸载/清数据。
 - 更新测试：先 `node tools/prepare-update-fixture.mjs`，再构建/安装 AndroidTest，运行 `node tools/update-flow-device-tests.mjs`。工具只使用原有兼容签名生成 androidTest 私有校验 APK；**fixture 没有应用代码/启动器，不得安装、发布或当成用户测试包**。设备脚本只允许专用模拟器，在 instrumentation 之外切换/恢复安装 AppOp；Android 撤销此授权会杀进程，不能在测试体 finally 中切权限，否则会把系统行为误当崩溃。Gate/代理/分页的 JVM 测试和 tools/update-settings-{ui,upgrade}-smoke.mjs 覆盖本轮行为。宽 Switch 的 TV 焦点需要显式 verticalFocus 顺序。
+- 每次提升应用版本后核对更新夹具也高于应用，且tools/update-fixture与UpdateFlowTest.release的版本一致；当前私有夹具code16 / preview.12仅用于校验比code15更高的包，不代表真实preview.12版本已开发或发布。不能为让旧夹具通过而放松防降级校验。
 - 依赖更新须 `:app:exportNoticeInputs` + `node tools/generate-notices.mjs`，审阅新增许可证。完整许可在 APK 设置中；desugar_jdk_libs 2.1.5 的上游源码归档独立随 Release 提供。
 - 自有代码许可证未指定，不擅自标 MIT/Apache/GPL；第三方授权见 NOTICE.md，不受此状态影响。
 

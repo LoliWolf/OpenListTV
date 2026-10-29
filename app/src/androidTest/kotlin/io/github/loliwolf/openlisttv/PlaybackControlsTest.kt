@@ -86,7 +86,7 @@ class PlaybackControlsTest {
             };panel=created!!
             eventually{var ready=false;main{ready=field(panel,"ready")==true};ready}
         }
-        fun click(label:String)=main{all(panel).filterIsInstance<Button>().single{it.text==label}.performClick()}
+        fun click(label:String)=main{PlayerUiActions.click(panel,label)}
         fun dialogClick(label:String)=main{
             val dialog=field(panel,"activeDialog") as AlertDialog
             all(dialog.window!!.decorView).filterIsInstance<Button>().single{it.text==label}.performClick()

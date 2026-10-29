@@ -87,12 +87,16 @@ class MainActivity : ComponentActivity() {
         browserList?.dispose(); browserList = null; browserContainer = null
         root.removeAllViews()
         return TvUi.column(this).apply {
-            setPadding(dp(32), dp(20), dp(32), dp(16))
-            addView(TvUi.text(this@MainActivity, "OPENLIST TV  /  资源库", 11f, TvUi.accent).apply { letterSpacing = .12f })
-            addView(TvUi.spacer(this@MainActivity, 5))
-            addView(TvUi.title(this@MainActivity, title).also(TvUi::ellipsis))
-            addView(TvUi.text(this@MainActivity, subtitle, 14f, TvUi.muted).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.MIDDLE })
-            addView(TvUi.spacer(this@MainActivity, 16))
+            val inset = if (resources.configuration.screenWidthDp < 600) 16 else 32
+            setPadding(dp(inset), dp(18), dp(inset), dp(12))
+            val heading = TvUi.column(this@MainActivity)
+            heading.addView(TvUi.text(this@MainActivity, "OPENLIST  /  TV", 10f, TvUi.accent).apply { letterSpacing = .16f; typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL) })
+            heading.addView(TvUi.spacer(this@MainActivity, 8))
+            heading.addView(TvUi.title(this@MainActivity, title).also(TvUi::ellipsis))
+            heading.addView(TvUi.spacer(this@MainActivity, 6))
+            heading.addView(TvUi.text(this@MainActivity, subtitle, 12f, TvUi.muted).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.MIDDLE })
+            addView(heading)
+            addView(TvUi.spacer(this@MainActivity, 14))
             root.addView(this, FrameLayout.LayoutParams(-1, -1))
         }
     }
@@ -146,16 +150,18 @@ class MainActivity : ComponentActivity() {
     }
     private fun showLogin(existing: Site? = null) {
         downloads.pause("登录页面，下载已暂停")
-        val content = page("OpenList TV", "轻量资源浏览 · 为电视与投影遥控而设计")
+        val content = page("连接你的资源", "照片、音乐与影片，在大屏上轻松打开")
         val scroll = ScrollView(this)
-        val form = TvUi.column(this)
-        scroll.addView(form); content.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val form = TvUi.column(this).apply { background = TvUi.shape(TvUi.card, dp(20).toFloat()); setPadding(dp(20), dp(20), dp(20), dp(16)) }
+        scroll.addView(form)
+        val centered = UiPanels.ContentFrame(this, 540).apply { addView(scroll, FrameLayout.LayoutParams(-1, -1)) }
+        content.addView(centered, LinearLayout.LayoutParams(-1, 0, 1f))
         val label = TvUi.input(this, "站点名称", existing?.label.orEmpty())
         val address = TvUi.input(this, "服务器地址（含 https://）", existing?.url.orEmpty()).apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI }
         val username = TvUi.input(this, "账号", existing?.username.orEmpty())
         val password = TvUi.input(this, "密码").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; isSaveEnabled = false }
         val http = TvUi.check(this, "允许此站点使用 HTTP（局域网明文传输）", existing?.allowHttp ?: false)
-        val status = TvUi.text(this, "一期使用账号密码登录；不会保存原始密码。", 14f, TvUi.muted)
+        val status = TvUi.text(this, "会话加密保存，不保存原始密码。", 12f, TvUi.muted)
         listOf(label, address, username, password, http, status, TvUi.spacer(this, 10)).forEach(form::addView)
         val row = ActionFlow(this)
         lateinit var connect: Button
@@ -178,8 +184,10 @@ class MainActivity : ComponentActivity() {
         row.addView(connect)
         TvUi.verticalFocus(label, address, username, password, http, connect)
         if (sites.sites().isNotEmpty()) row.addView(TvUi.button(this, "已保存站点") { showSites() })
-        row.addView(updateButton())
         row.addView(TvUi.button(this, "本机下载") { showDownloads() })
+        row.addView(TvUi.button(this, "更多") {
+            updateSettings()
+        })
         form.addView(row)
         address.requestFocus()
     }
@@ -191,16 +199,13 @@ class MainActivity : ComponentActivity() {
         val viewQuery = browserQuery
         val toolbar = ActionFlow(this)
         toolbar.addView(TvUi.button(this, "上一级") { if (currentPath != "/") { currentPath = Paths.parent(currentPath); offset = 0 }; showBrowser() })
-        toolbar.addView(TvUi.button(this, "根目录") { currentPath = "/"; offset = 0; showBrowser() })
-        toolbar.addView(TvUi.button(this, "排序") { sortingDialog() })
-        toolbar.addView(TvUi.button(this, "搜索 / 筛选") { searchDialog() })
-        toolbar.addView(TvUi.button(this, "开始轮播", primary = true) { slideshowDialog() })
-        toolbar.addView(TvUi.button(this, "重新加载") { showBrowser(true) })
-        toolbar.addView(TvUi.button(this, "站点") { showSites() })
-        toolbar.addView(TvUi.button(this, "设置") { showSettings() })
-        toolbar.addView(TvUi.button(this, "下载") { downloadMenu() })
-        content.addView(toolbar); content.addView(TvUi.spacer(this, 10))
-        val status = TvUi.text(this, "准备目录…", 14f, TvUi.muted).apply { maxLines = 2 }
+        toolbar.addView(TvUi.button(this, "搜索") { searchDialog() }.apply { contentDescription = "搜索 / 筛选" })
+        toolbar.addView(TvUi.button(this, "轮播", primary = true) { slideshowDialog() }.apply { contentDescription = "开始轮播" })
+        toolbar.addView(TvUi.button(this, "更多") { browserMenu() })
+        val heading = content.getChildAt(0)
+        content.removeView(heading)
+        content.addView(UiPanels.Header(this, heading, toolbar), 0, LinearLayout.LayoutParams(-1, -2))
+        val status = TvUi.text(this, "准备目录…", 12f, TvUi.muted).apply { maxLines = 2; setPadding(dp(2), dp(2), 0, dp(6)) }
         content.addView(status)
         val listHost = FrameLayout(this)
         content.addView(listHost, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -218,7 +223,7 @@ class MainActivity : ComponentActivity() {
                 if (generation != currentGeneration) return@launch
                 if (result.total > 0 && pageOffset >= result.total) { offset = 0; showBrowser(); return@launch }
                 browserTotal = result.total
-                status.text = (if (result.total == 0) if (viewQuery.active) "没有匹配项" else "目录为空" else "${result.total} 项 · ${sort.field.label}${if (sort.descending) "降序" else "升序"} · 图片自动预览") + if (viewQuery.active) "\n当前目录 · ${viewQuery.description}" else ""
+                status.text = (if (result.total == 0) if (viewQuery.active) "没有匹配项" else "目录为空" else "${result.total} 项  ·  ${sort.field.label}${if (sort.descending) "降序" else "升序"}") + if (viewQuery.active) "\n${viewQuery.description}" else ""
                 if (result.total > 0) {
                     val browser = BrowserList(this@MainActivity, repo, path, sort, result, pageOffset, lifecycleScope,
                         opened = { e, index ->
@@ -253,21 +258,36 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun browserMenu() {
+        UiPanels.show(UiPanels.menu(this, "资源库操作", listOf(
+            UiPanels.Action("排序", "${sort.field.label} · ${if (sort.descending) "降序" else "升序"}") { sortingDialog() },
+            UiPanels.Action("重新加载", "重新读取当前目录") { showBrowser(true) },
+            UiPanels.Action("根目录", "返回站点根目录") { currentPath = "/"; offset = 0; showBrowser() },
+            UiPanels.Action("站点", "切换或添加 OpenList") { showSites() },
+            UiPanels.Action("下载", "下载选中项，或查看本机文件") { downloadMenu() },
+            UiPanels.Action("设置", "更新、账号与存储") { showSettings() },
+        )))
+    }
     private fun searchDialog() {
         val current = browserQuery
-        val form = TvUi.column(this).apply { setPadding(dp(20), 0, dp(20), 0) }
+        var type = current.type
+        val form = UiPanels.form(this)
         val input = TvUi.input(this, "当前目录文件名搜索", current.text).apply { filters = arrayOf(InputFilter.LengthFilter(128)); isSaveEnabled = false }
-        val types = RadioGroup(this)
-        val ids = BrowserType.entries.map { View.generateViewId() }
-        BrowserType.entries.forEachIndexed { i, type -> types.addView(RadioButton(this).apply { id = ids[i]; text = type.label; textSize = 17f; isChecked = current.type == type }) }
-        form.addView(input); form.addView(types)
-        form.addView(TvUi.text(this, "搜索和类型可组合；仅当前目录，不扫描子目录。筛选不改变轮播范围。", 13f, TvUi.muted))
-        AlertDialog.Builder(this).setTitle("当前目录搜索 / 类型筛选").setView(ScrollView(this).apply { addView(form) })
+        lateinit var choice: UiPanels.Preference
+        choice = UiPanels.Preference(this, "文件类型", "与文件名组合筛选", type.label) {
+            UiPanels.show(UiPanels.menu(this, "文件类型", BrowserType.entries.map { candidate ->
+                UiPanels.Action(candidate.label) { type = candidate; choice.value(type.label) }
+            }))
+        }
+        form.addView(input); form.addView(choice)
+        form.addView(TvUi.text(this, "只搜索当前目录，不扫描子目录，也不改变轮播范围。", 12f, TvUi.muted).apply { setPadding(dp(16), dp(12), dp(16), dp(4)) })
+        val dialog = AlertDialog.Builder(this).setTitle("搜索与筛选").setView(form)
             .setPositiveButton("应用") { _, _ ->
-                queries[currentPath] = BrowserQuery(input.text.toString().trim(), BrowserType.entries[ids.indexOf(types.checkedRadioButtonId).coerceAtLeast(0)])
+                queries[currentPath] = BrowserQuery(input.text.toString().trim(), type)
                 offset = 0; focusMemory.remove(currentPath); showBrowser()
             }.setNeutralButton("清除") { _, _ -> queries.remove(currentPath); offset = 0; focusMemory.remove(currentPath); showBrowser() }
-            .setNegativeButton("取消", null).show()
+            .setNegativeButton("取消", null).create()
+        UiPanels.show(dialog, input); TvUi.verticalFocus(input, choice, dialog.getButton(AlertDialog.BUTTON_POSITIVE))
     }
     private fun directoryPassword(path: String) {
         val input = TvUi.input(this, "目录密码").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; isSaveEnabled = false }
@@ -275,69 +295,40 @@ class MainActivity : ComponentActivity() {
             .setPositiveButton("确定") { _, _ -> repository?.remember(path, input.text.toString()); input.text.clear(); showBrowser(true) }.setNegativeButton("取消", null).show()
     }
     private fun sortingDialog() {
-        val fields = SortField.entries
-        val form = TvUi.column(this).apply { setPadding(dp(20), 0, dp(20), 0) }
-        val group = RadioGroup(this)
-        val fieldIds = fields.map { View.generateViewId() }
-        fields.forEachIndexed { i, field -> group.addView(RadioButton(this).apply { id = fieldIds[i]; text = field.label; textSize = 18f; isChecked = field == sort.field }) }
-        val descending = TvUi.check(this, "降序", sort.descending)
-        val folders = TvUi.check(this, "文件夹置顶", sort.foldersFirst)
-        form.addView(group); form.addView(descending); form.addView(folders)
-        AlertDialog.Builder(this).setTitle("完整目录排序").setView(form).setPositiveButton("应用") { _, _ ->
-            sort = SortOrder(fields[fieldIds.indexOf(group.checkedRadioButtonId).coerceAtLeast(0)], descending.isChecked, folders.isChecked)
+        var field = sort.field
+        val form = UiPanels.form(this)
+        lateinit var choice: UiPanels.Preference
+        choice = UiPanels.Preference(this, "排序依据", "应用于当前目录的全部文件", field.label) {
+            UiPanels.show(UiPanels.menu(this, "排序依据", SortField.entries.map { candidate ->
+                UiPanels.Action(candidate.label) { field = candidate; choice.value(field.label) }
+            }))
+        }
+        val descending = UiPanels.toggle(this, "降序", sort.descending) {}
+        val folders = UiPanels.toggle(this, "文件夹置顶", sort.foldersFirst) {}
+        form.addView(choice); form.addView(descending); form.addView(folders)
+        val dialog = AlertDialog.Builder(this).setTitle("排序").setView(form).setPositiveButton("应用") { _, _ ->
+            sort = SortOrder(field, descending.isChecked, folders.isChecked)
             repository?.let { sites.setSort(it.session.site, sort) }; offset = 0; showBrowser()
-        }.setNegativeButton("取消", null).show()
+        }.setNegativeButton("取消", null).create()
+        UiPanels.show(dialog, choice); TvUi.verticalFocus(choice, descending, folders, dialog.getButton(AlertDialog.BUTTON_POSITIVE))
     }
     private fun slideshowDialog() {
-        val options = sites.slideshow()
-        val form = TvUi.column(this).apply { setPadding(dp(20), 0, dp(20), 0) }
-        val modes = RadioGroup(this)
-        val modeIds = TraversalMode.entries.map { View.generateViewId() }
-        TraversalMode.entries.forEachIndexed { i, mode -> modes.addView(RadioButton(this).apply { id = modeIds[i]; text = mode.label; textSize = 17f; isChecked = mode == options.mode }) }
-        val recursive = TvUi.check(this, "包含子目录", options.recursive)
-        val imageOnly = TvUi.check(this, "仅图片", options.imageOnly)
-        val reuseIndex = TvUi.check(this, "复用轮播索引（6 小时）", options.reuseIndex)
-        val forceRescan = TvUi.check(this, "本次重新扫描（忽略旧快照）", false)
-        val imageSeconds = TvUi.input(this, "图片停留秒数（1–3600）", options.imageSeconds.toString(), "秒").apply { inputType = InputType.TYPE_CLASS_NUMBER }
-        val videoSeconds = TvUi.input(this, "视频秒数（0 表示播放到结束）", options.videoSeconds.toString(), "秒").apply { inputType = InputType.TYPE_CLASS_NUMBER }
-        val audioSeconds = TvUi.input(this, "音频秒数（0 表示播放到结束）", options.audioSeconds.toString(), "秒").apply { inputType = InputType.TYPE_CLASS_NUMBER }
-        val stopMinutes = TvUi.input(this, "定时停止轮播（0 表示关闭）", options.stopAfterMinutes.toString(), "分钟").apply { inputType = InputType.TYPE_CLASS_NUMBER }
-        val prefetch = TvUi.check(this, "预取音视频地址（图片始终预加载一张）", options.prefetch)
-        form.addView(TvUi.text(this, "播放方式", 13f, TvUi.accent)); form.addView(modes)
-        form.addView(recursive); form.addView(imageOnly); form.addView(TvUi.spacer(this, 12))
-        form.addView(TvUi.text(this, "公平抽样：最多 1 万候选，继续扫描整个可访问范围；可能重复，不保证每张都播到。扫描完成前仅针对已读部分抽样。", 13f, TvUi.muted))
-        form.addView(reuseIndex); form.addView(forceRescan)
-        form.addView(TvUi.text(this, "索引复用适用于全树随机和公平抽样。6 小时内免重扫；6–24 小时先播旧快照并在前台重扫，超过 24 小时重建。仅保留最近一个范围；有目录密码时不跨会话复用。", 13f, TvUi.muted))
-        form.addView(TvUi.text(this, "播放时长", 13f, TvUi.accent)); form.addView(TvUi.spacer(this, 8))
-        listOf(imageSeconds, videoSeconds, audioSeconds).forEach(form::addView)
-        form.addView(TvUi.text(this, "图片：到时切换。视频 / 音频：填 0 播放到结束，填其他数字则最多播放该时长。", 14f, TvUi.muted))
-        form.addView(stopMinutes)
-        form.addView(TvUi.text(this, "定时范围 0–1440 分钟，暂停也计时；到时退出轮播，不关机。后台不唤醒，返回时检查。", 13f, TvUi.muted))
-        form.addView(prefetch)
-        form.addView(TvUi.text(this, "只提前准备一张图片；慢网时保留当前画面，准备好再切换。", 13f, TvUi.muted))
-        val scroll = ScrollView(this).apply { addView(form) }
-        val dialog = AlertDialog.Builder(this).setTitle("从 $currentPath 开始轮播").setView(scroll).setPositiveButton("开始", null).setNegativeButton("取消", null).create()
+        val dialog = SlideshowSetup(this, currentPath, sites.slideshow()) { options ->
+            sites.setSlideshow(options); openPlayer(null, 0, options)
+        }.dialog
         slideshowSettings = dialog
         dialog.setOnDismissListener { if (slideshowSettings === dialog) slideshowSettings = null }
-        dialog.setOnShowListener {
-            TvUi.verticalFocus(*(modeIds.map { modes.findViewById<View>(it) } + listOf(recursive, imageOnly, reuseIndex, forceRescan, imageSeconds, videoSeconds, audioSeconds, stopMinutes, prefetch, dialog.getButton(AlertDialog.BUTTON_POSITIVE))).toTypedArray())
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val o = runCatching { SlideshowOptions(TraversalMode.entries[modeIds.indexOf(modes.checkedRadioButtonId).coerceAtLeast(0)], recursive.isChecked, imageOnly.isChecked, imageSeconds.text.toString().toInt(), videoSeconds.text.toString().toInt(), audioSeconds.text.toString().toInt(), prefetch.isChecked, stopMinutes.text.toString().toInt(), reuseIndex.isChecked, forceRescan.isChecked) }.getOrNull()
-                if (o == null) { Toast.makeText(this, "图片 1–3600 秒，音视频 0–3600 秒，定时停止 0–1440 分钟", Toast.LENGTH_LONG).show(); return@setOnClickListener }
-                sites.setSlideshow(o); dialog.dismiss(); openPlayer(null, 0, o)
-            }
-        }
         dialog.show()
-        fitSlideshowDialog()
     }
-    private fun fitSlideshowDialog() {
-        val inset = if (resources.configuration.screenWidthDp < 600) 24 else 80
-        slideshowSettings?.window?.setLayout(minOf(dp(620), resources.displayMetrics.widthPixels - dp(inset)), -2)
-    }
+    private fun fitSlideshowDialog() { slideshowSettings?.let(UiPanels::fit) }
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         // Keep directory, current media and timers alive while native views reflow.
-        browserList?.updateCompactLayout(); fitSlideshowDialog()
+        browserList?.updateCompactLayout(); fitSlideshowDialog(); UiPanels.refitOpenDialogs()
+        (root.getChildAt(0) as? LinearLayout)?.let {
+            val inset = dp(if (newConfig.screenWidthDp < 600) 16 else 32)
+            it.setPadding(inset, it.paddingTop, inset, it.paddingBottom)
+        }
     }
     private fun openPlayer(entry: Entry?, origin: Int, options: SlideshowOptions?, promptResume: Boolean = true,
         playerRepository: FileRepository? = repository, playerPath: String = currentPath, playerQuery: BrowserQuery = browserQuery) {
@@ -390,52 +381,86 @@ class MainActivity : ComponentActivity() {
     }
     private fun showSites() {
         val all = sites.sites()
-        val labels = all.map { "${it.label} · ${it.username}" } + "添加站点"
-        AlertDialog.Builder(this).setTitle("切换站点（同一时刻仅一个活动站点）").setItems(labels.toTypedArray()) { _, which ->
-            if (which == all.size) showLogin() else { focusMemory.clear(); restore(all[which]) }
-        }.setNegativeButton("取消", null).show()
+        val actions = all.map { site -> UiPanels.Action(site.label, site.username + if (site.id == repository?.session?.site?.id) " · 当前站点" else "") {
+            focusMemory.clear(); restore(site)
+        } } + UiPanels.Action("添加站点", "连接另一台 OpenList") { showLogin() }
+        UiPanels.show(UiPanels.menu(this, "我的站点", actions, "同一时刻只连接一个站点"))
     }
     private fun showSettings() {
-        val screen = page("设置", "OpenList TV ${BuildConfig.VERSION_NAME} · 原生 Android · 无后台常驻")
-        val content = TvUi.column(this)
-        screen.addView(ScrollView(this).apply { addView(content) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        content.addView(TvUi.text(this, "画质：最高 4K，HDR 按设备能力输出\n图片输入上限：128 MiB，显示仍采样\n单文件超限或无法解码：轮播跳过\n索引上限：10 万条 / 64 MiB\n视频缓冲目标上限：24 MiB", 18f))
-        content.addView(TvUi.spacer(this, 18))
-        lateinit var checkUpdate: Button
-        checkUpdate = TvUi.button(this, "检查 GitHub 更新", primary = true) { updates.manual(checkUpdate) }
-        content.addView(checkUpdate)
+        val screen = page("设置", "OpenList TV ${BuildConfig.VERSION_NAME}")
+        val content = UiPanels.form(this)
+        val rows = listOf(
+            UiPanels.Preference(this, "应用更新", "更新策略、代理和安装方式", BuildConfig.VERSION_NAME) { updateSettings() },
+            UiPanels.Preference(this, "本机下载", "离线打开、导出与传输进度", "") { showDownloads() },
+            UiPanels.Preference(this, "站点与账号", repository?.session?.site?.label ?: "管理已保存站点", "") { accountSettings() },
+            UiPanels.Preference(this, "存储与缓存", "资源预算与本机缓存管理", "") { storageSettings() },
+            UiPanels.Preference(this, "关于 OpenList TV", "轻量原生播放器与第三方许可", "") { about() },
+        )
+        rows.forEach(content::addView)
+        val back = TvUi.button(this, "返回文件浏览") { showBrowser() }
+        content.addView(TvUi.spacer(this, 14)); content.addView(back)
+        val centered = UiPanels.ContentFrame(this, 720).apply { addView(UiPanels.scroll(this@MainActivity, content), FrameLayout.LayoutParams(-1, -1)) }
+        screen.addView(centered, LinearLayout.LayoutParams(-1, 0, 1f))
+        TvUi.verticalFocus(*(rows + back).toTypedArray()); rows.first().requestFocus()
+    }
+    private fun updateSettings() {
+        val content = UiPanels.form(this)
+        lateinit var check: Button
+        check = TvUi.button(this, "检查 GitHub 更新", primary = true) { updates.manual(check) }
+        content.addView(check); content.addView(UiPanels.section(this, "更新偏好"))
         updates.addSettings(content)
-        content.addView(TvUi.spacer(this, 10))
-        content.addView(TvUi.button(this, "本机下载") { showDownloads() })
-        content.addView(TvUi.spacer(this, 10))
-        content.addView(TvUi.button(this, "第三方许可") {
-            val text = TvUi.text(this, assets.open("third-party-notices.txt").bufferedReader().use { it.readText() }, 12f).apply { setPadding(dp(16), dp(12), dp(16), dp(12)) }
-            AlertDialog.Builder(this).setTitle("第三方许可").setView(ScrollView(this).apply { addView(text) }).setPositiveButton("关闭", null).show()
-        })
-        content.addView(TvUi.spacer(this, 10))
-        content.addView(TvUi.button(this, "清理资源索引与图片缓存") {
-            work = lifecycleScope.launch { withContext(Dispatchers.IO) { catalog.clear(); cacheDir.resolve("images").listFiles()?.forEach { it.delete() } }; Toast.makeText(this@MainActivity, "缓存已清理，服务器文件未改变", Toast.LENGTH_SHORT).show() }
-        })
-        content.addView(TvUi.spacer(this, 10))
-        content.addView(TvUi.button(this, "退出当前账号") {
-            val session = repository?.session ?: return@button
-            AlertDialog.Builder(this).setTitle("退出账号？").setMessage("清除本机会话和该账号的缓存，不删除服务器资源。已下载的本机副本保留，可在本机下载中单独删除。").setNegativeButton("取消", null).setPositiveButton("退出") { _, _ ->
+        val dialog = AlertDialog.Builder(this).setTitle("应用更新").setView(UiPanels.scroll(this, content)).setNegativeButton("完成", null).create()
+        UiPanels.show(dialog, check)
+        val focus = (0 until content.childCount).map(content::getChildAt).filter { it.isFocusable }
+        TvUi.verticalFocus(*(focus + dialog.getButton(AlertDialog.BUTTON_NEGATIVE)).toTypedArray())
+    }
+    private fun accountSettings() {
+        val site = repository?.session?.site
+        val actions = mutableListOf(UiPanels.Action("切换或添加站点") { showSites() })
+        if (site != null) {
+            actions += UiPanels.Action("编辑当前站点", site.label) { showLogin(site) }
+            actions += UiPanels.Action("退出当前账号", "本机下载保留，服务器文件不变") { signOut() }
+        }
+        UiPanels.show(UiPanels.menu(this, "站点与账号", actions))
+    }
+    private fun storageSettings() {
+        UiPanels.show(UiPanels.menu(this, "存储与缓存", listOf(
+            UiPanels.Action("资源预算", "查看图片、索引与播放缓冲限制") {
+                UiPanels.show(AlertDialog.Builder(this).setTitle("资源预算")
+                    .setMessage("图片输入最多 128 MiB，显示按内存预算采样。\n索引最多 10 万候选，共享 64 MiB 磁盘预算。\n音视频缓冲目标 24 MiB。\n\n最高 4K、HDR 取决于设备能力；无法解码且无低清源时轮播跳过。")
+                    .setPositiveButton("知道了", null).create())
+            },
+            UiPanels.Action("清理资源索引与图片缓存", "不删除账号、播放进度或本机下载") {
+                UiPanels.show(AlertDialog.Builder(this).setTitle("清理缓存？").setMessage("仅清理可重新生成的资源索引和图片缓存，不影响服务器文件或本机下载。")
+                    .setPositiveButton("清理") { _, _ -> work = lifecycleScope.launch {
+                        try {
+                            withContext(Dispatchers.IO) { catalog.clear(); cacheDir.resolve("images").listFiles()?.forEach { it.delete() } }
+                            toast("缓存已清理，服务器文件未改变")
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { toast(message(e)) }
+                    } }.setNegativeButton("取消", null).create())
+            },
+        )))
+    }
+    private fun about() {
+        UiPanels.show(UiPanels.menu(this, "OpenList TV", listOf(UiPanels.Action("第三方许可", "查看开源组件与授权") {
+            val text = TvUi.text(this, assets.open("third-party-notices.txt").bufferedReader().use { it.readText() }, 12f).apply { setPadding(dp(20), dp(12), dp(20), dp(12)) }
+            UiPanels.show(AlertDialog.Builder(this).setTitle("第三方许可").setView(UiPanels.scroll(this, text)).setPositiveButton("关闭", null).create())
+        }), "${BuildConfig.VERSION_NAME} · 原生 Android\n为电视与投影设计，无后台常驻"))
+    }
+    private fun signOut() {
+        val session = repository?.session ?: return
+        UiPanels.show(AlertDialog.Builder(this).setTitle("退出账号？").setMessage("清除本机会话和该账号的索引及历史，不删除服务器资源。本机下载保留。")
+            .setNegativeButton("取消", null).setPositiveButton("退出") { _, _ ->
                 work = lifecycleScope.launch {
                     downloads.pauseAndJoin("账号已退出，下载已暂停")
                     withContext(Dispatchers.IO) { sites.signOut(session.site); catalog.clear(session.site.id, clearHistory = true) }
                     repository = null
                     val signedOut = try { api.logout(session); true } catch (e: CancellationException) { throw e } catch (_: Exception) { false }
-                    Toast.makeText(this@MainActivity, if (signedOut) "已退出" else "本机已退出，服务端注销未确认", Toast.LENGTH_LONG).show()
+                    toast(if (signedOut) "已退出" else "本机已退出，服务端注销未确认")
                     showLogin(session.site)
                 }
-            }.show()
-        })
-        content.addView(TvUi.spacer(this, 10))
-        content.addView(TvUi.button(this, "返回文件浏览") { showBrowser() })
-        // Switch's thumb-focused rectangle can make Android skip a full-width switch
-        // between left-aligned buttons. Define a predictable TV up/down chain.
-        TvUi.verticalFocus(*(0 until content.childCount).map(content::getChildAt).filter { it.isFocusable }.toTypedArray())
-        checkUpdate.requestFocus()
+            }.create())
     }
     private fun toast(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
     private fun downloadMenu() {
@@ -547,7 +572,7 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); panel?.windowFocusChanged(hasFocus); if (hasFocus && ::root.isInitialized) updates.foreground() }
     override fun onStop() { work?.cancel(); updates.background(); downloads.pause("离开前台，传输已暂停；可手动继续"); browserList?.pauseLoading(); panel?.background(); super.onStop() }
     override fun onTrimMemory(level: Int) { super.onTrimMemory(level); if (level != TRIM_MEMORY_UI_HIDDEN) panel?.trimMemory() }
-    override fun onDestroy() { work?.cancel(); downloadList?.dispose(); browserList?.dispose(); panel?.dispose(); super.onDestroy() }
+    override fun onDestroy() { work?.cancel(); downloadList?.dispose(); browserList?.dispose(); panel?.dispose(); UiPanels.dismissFor(this); super.onDestroy() }
     override fun onSaveInstanceState(outState: Bundle) { outState.putString("download.exportId", exportId); updates.save(outState); super.onSaveInstanceState(outState) }
     companion object {
         fun message(e: Exception): String {

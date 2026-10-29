@@ -1,8 +1,39 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item><item name="android:windowActionModeOverlay">true</item>
-        <item name="android:colorAccent">#A2C9FF</item><item name="android:windowBackground">#111111</item>
-        <item name="android:statusBarColor">#111111</item><item name="android:navigationBarColor">#111111</item>
+        <item name="android:colorAccent">#A6DCC6</item><item name="android:windowBackground">#111C19</item>
+        <item name="android:colorControlHighlight">#33A6DCC6</item>
+        <item name="android:alertDialogTheme">@style/PanelTheme</item>
+        <item name="android:statusBarColor">#111C19</item><item name="android:navigationBarColor">#111C19</item>
         <item name="android:windowLightStatusBar">false</item>
+    </style>
+    <style name="PanelTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#A6DCC6</item>
+        <item name="android:colorBackground">#1A2923</item>
+        <item name="android:colorForeground">#ECF3EA</item>
+        <item name="android:textColorPrimary">#ECF3EA</item>
+        <item name="android:textColorSecondary">#A8BBB1</item>
+        <item name="android:textColorAlertDialogListItem">#ECF3EA</item>
+        <item name="android:colorControlHighlight">#33A6DCC6</item>
+        <item name="android:buttonBarButtonStyle">@style/PanelButton</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/PanelButton</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/PanelButton</item>
+        <item name="android:buttonBarNeutralButtonStyle">@style/PanelButton</item>
+        <item name="android:windowBackground">@drawable/dialog_surface</item>
+        <item name="android:windowMinWidthMajor">52%</item>
+        <item name="android:windowMinWidthMinor">92%</item>
+        <item name="android:backgroundDimAmount">0.5</item>
+    </style>
+    <style name="PanelButton" parent="android:style/Widget.Material.Button.Borderless">
+        <item name="android:textColor">#A6DCC6</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:minWidth">68dp</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:paddingRight">16dp</item>
+        <item name="android:background">@drawable/panel_button</item>
+        <item name="android:stateListAnimator">@null</item>
     </style>
 </resources>

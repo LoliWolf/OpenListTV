@@ -15,9 +15,9 @@ class DownloadsPanel(activity: Activity, controller: DownloadController, parent:
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
     init {
         orientation = VERTICAL
-        val status = TvUi.text(activity, "", 14f, TvUi.muted).apply { maxLines = 3 }
+        val status = TvUi.text(activity, "", 13f, TvUi.muted).apply { maxLines = 3; setPadding(activity.dp(12), activity.dp(10), activity.dp(12), activity.dp(12)) }
         val pause = TvUi.button(activity, "暂停当前传输") { controller.pause() }
-        addView(status); addView(pause); addView(TvUi.spacer(activity, 8))
+        addView(status); addView(pause); addView(TvUi.spacer(activity, 12))
         var records = emptyList<SavedDownload>()
         val adapter = object : RecyclerView.Adapter<Holder>() {
             override fun getItemCount() = records.size
